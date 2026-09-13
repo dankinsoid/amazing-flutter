@@ -62,13 +62,15 @@ uniform float uContentStrength;  // [25] content displacement per px of water en
 // [26] water, shared by all touches: k rad/px, omega rad/s, lambda px, tau s
 uniform vec4 uWave;
 
-// [30] touches: x, y, age s, amplitude px; amplitude 0 = empty slot
-uniform vec4 uTouches[MAX_TOUCHES];
+// [30] touches, 2 slots each: (a.xy, b.xy), (age at a, age at b, amplitude px, -).
+// A tap is a == b; a stroke sweeps a -> b, so age is interpolated along it.
+// Amplitude 0 = empty slot.
+uniform vec4 uTouches[MAX_TOUCHES * 2];
 
-// [46] shapes, SHAPE_STRIDE slots each; kind 0 = empty slot
+// [62] shapes, SHAPE_STRIDE slots each; kind 0 = empty slot
 uniform vec4 uShapes[MAX_SHAPES * SHAPE_STRIDE];
 
-// Total: 142 floats.
+// Total: 158 floats.
 
 uniform sampler2D uBackdrop;  // sampler 0, engine-filled; already blurred when frost is composed
 uniform sampler2D uContent;   // sampler 1, content snapshot, premultiplied
@@ -177,20 +179,23 @@ float heightGlass(float sd) {
 	return uGlassHeight * glassProfile(x);
 }
 
-// One ring: .x height, .y envelope (amplitude without the oscillation).
-vec2 waterRing(vec2 p, vec4 touch) {
-	if (touch.w <= 0.0) return vec2(0.0);
+// One source: .x height, .y envelope (amplitude without the oscillation).
+vec2 waterRing(vec2 p, vec4 seg, vec4 t) {
+	if (t.z <= 0.0) return vec2(0.0);
 	float k = uWave.x, omega = uWave.y, lambda = uWave.z, tau = uWave.w;
-	float r = length(p - touch.xy);
-	float age = touch.z;
+	vec2 pa = p - seg.xy, ba = seg.zw - seg.xy;
+	float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
+	float r = length(pa - ba * h);
+	float age = mix(t.x, t.y, h);
+	float amp = t.z;
 	// Nothing ahead of the front, or a tap paints rings everywhere at once.
 	float front = (omega / k) * age;
 	float gate = 1.0 - smoothstep(front - 2.0 * PI / k, front, r);
-	float env = touch.w * exp(-r / lambda) * exp(-age / tau) * gate;
+	float env = amp * exp(-r / lambda) * exp(-age / tau) * gate;
 	return vec2(env * sin(k * r - omega * age), env);
 }
 
-#define TOUCH(i) w += waterRing(p, uTouches[i])
+#define TOUCH(i) w += waterRing(p, uTouches[(i) * 2], uTouches[(i) * 2 + 1])
 
 vec2 heightWater(vec2 p) {
 	vec2 w = vec2(0.0);

@@ -26,18 +26,28 @@ class LiquidGlassDemo extends StatefulWidget {
 
 class _LiquidGlassDemoState extends State<LiquidGlassDemo> {
 	static const _blobRadius = 70.0;
-	static const _trailStep = 24.0;
+	static const _segmentLength = 80.0;
 
 	Offset _blob = const Offset(200, 300);
 	final List<GlassTouch> _touches = [];
 	bool _dragging = false;
-	Offset? _lastRipple;
+	bool _stroking = false;
 
-	void _ripple(Offset at, {double amplitude = 3}) {
-		_touches
-			..removeWhere((t) => !t.isAliveAt(DateTime.now(), const GlassWave()))
-			..add(GlassTouch(position: at, amplitude: amplitude));
-		_lastRipple = at;
+	void _prune() => _touches.removeWhere((t) => !t.isAliveAt(DateTime.now(), const GlassWave()));
+
+	void _tap(Offset at) {
+		_prune();
+		_touches.add(GlassTouch(start: at));
+	}
+
+	void _stroke(Offset at) {
+		_prune();
+		final last = _stroking && _touches.isNotEmpty ? _touches.last : null;
+		if (last == null || (last.end - last.start).distance > _segmentLength) {
+			_touches.add(GlassTouch(start: last?.end ?? at, amplitude: 2));
+		}
+		_touches.last = _touches.last.extendTo(at);
+		_stroking = true;
 	}
 
 	@override
@@ -45,16 +55,16 @@ class _LiquidGlassDemoState extends State<LiquidGlassDemo> {
 		final size = MediaQuery.sizeOf(context);
 		final barY = size.height - 60;
 		return GestureDetector(
-			onTapDown: (d) => setState(() => _ripple(d.localPosition)),
+			onTapDown: (d) => setState(() => _tap(d.localPosition)),
 			onPanStart: (d) => _dragging = (d.localPosition - _blob).distance < _blobRadius,
 			onPanUpdate: (d) => setState(() {
 				if (_dragging) {
 					_blob += d.delta;
-				} else if ((d.localPosition - (_lastRipple ?? Offset.infinite)).distance > _trailStep) {
-					_ripple(d.localPosition, amplitude: 2);
+				} else {
+					_stroke(d.localPosition);
 				}
 			}),
-			onPanEnd: (_) => _lastRipple = null,
+			onPanEnd: (_) => _stroking = false,
 			child: LiquidGlass(
 				shapes: [
 					GlassCapsule(a: Offset(48, barY), b: Offset(size.width - 48, barY), radius: 32),
