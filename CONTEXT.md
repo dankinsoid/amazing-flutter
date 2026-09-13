@@ -100,7 +100,11 @@ blow-away), genie, god rays behind live text input, caustics.
 - `ImageFilter.shader` and `isShaderFilterSupported` are present in this SDK
   (verified in `sky_engine/lib/ui/painting.dart`) — no upgrade needed to start.
 - [#170820](https://github.com/flutter/flutter/issues/170820) (blur + shader in one
-  `BackdropFilter` rescaling the texture) affected 3.32–3.33 and is **fixed** here.
+  `BackdropFilter`): the runtime shader runs at the blur's downsampled resolution,
+  so `FlutterFragCoord`/`uSize` shrink, shapes in full-res px land off-texture and
+  the output is blocky. **Reproduced on 3.38.9.** The fix (#177687) merged to
+  master 2025-10-30, after the 3.38 branch cut — needs a newer stable, or frost
+  must be done inside the shader.
 - `README.md` was written against 3.47 release notes, so anything it describes as
   new may need a version check before use.
 - **macOS runs Skia by default in 3.38.** `flutter run` passes
