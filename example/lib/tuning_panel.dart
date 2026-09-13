@@ -1,0 +1,145 @@
+// @ai-generated(solo)
+
+import 'package:amazing_flutter/amazing_flutter.dart';
+import 'package:flutter/material.dart';
+
+typedef _Set = GlassMaterial Function(GlassMaterial m, double v);
+
+class _Knob {
+	const _Knob(this.label, this.min, this.max, this.get, this.set);
+
+	final String label;
+	final double min;
+	final double max;
+	final double Function(GlassMaterial m) get;
+	final _Set set;
+}
+
+const _knobs = <(String, List<_Knob>)>[
+	('Lens', [
+		_Knob('height', 0, 30, _h, _sh),
+		_Knob('edgeWidth', 1, 80, _ew, _sew),
+		_Knob('thickness', 0, 100, _th, _sth),
+		_Knob('aberration', 0, 0.6, _ab, _sab),
+		_Knob('smoothK', 0, 80, _sk, _ssk),
+	]),
+	('Light', [
+		_Knob('specular', 0, 2, _sp, _ssp),
+		_Knob('shininess', 1, 200, _sh_, _ssh),
+		_Knob('rim', 0, 2, _ri, _sri),
+		_Knob('rimWidth', 0, 30, _rw, _srw),
+		_Knob('fresnel', 0, 1, _fr, _sfr),
+		_Knob('innerShadow', 0, 1, _is, _sis),
+	]),
+	('Color', [
+		_Knob('tintStrength', 0, 1, _ts, _sts),
+		_Knob('saturation', 0, 2, _sa, _ssa),
+		_Knob('frostSigma', 0, 30, _fs, _sfs),
+	]),
+	('Water', [
+		_Knob('rippleStrength', 0, 3, _rs, _srs),
+		_Knob('wavelength', 6, 80, _wl, _swl),
+		_Knob('frequency', 0.2, 8, _fq, _sfq),
+		_Knob('reach', 20, 800, _re, _sre),
+		_Knob('lifetime', 0.2, 5, _lt, _slt),
+	]),
+];
+
+double _h(GlassMaterial m) => m.height;
+GlassMaterial _sh(GlassMaterial m, double v) => m.copyWith(height: v);
+double _ew(GlassMaterial m) => m.edgeWidth;
+GlassMaterial _sew(GlassMaterial m, double v) => m.copyWith(edgeWidth: v);
+double _th(GlassMaterial m) => m.thickness;
+GlassMaterial _sth(GlassMaterial m, double v) => m.copyWith(thickness: v);
+double _ab(GlassMaterial m) => m.aberration;
+GlassMaterial _sab(GlassMaterial m, double v) => m.copyWith(aberration: v);
+double _sk(GlassMaterial m) => m.smoothK;
+GlassMaterial _ssk(GlassMaterial m, double v) => m.copyWith(smoothK: v);
+double _sp(GlassMaterial m) => m.specular;
+GlassMaterial _ssp(GlassMaterial m, double v) => m.copyWith(specular: v);
+double _sh_(GlassMaterial m) => m.shininess;
+GlassMaterial _ssh(GlassMaterial m, double v) => m.copyWith(shininess: v);
+double _ri(GlassMaterial m) => m.rim;
+GlassMaterial _sri(GlassMaterial m, double v) => m.copyWith(rim: v);
+double _rw(GlassMaterial m) => m.rimWidth;
+GlassMaterial _srw(GlassMaterial m, double v) => m.copyWith(rimWidth: v);
+double _fr(GlassMaterial m) => m.fresnel;
+GlassMaterial _sfr(GlassMaterial m, double v) => m.copyWith(fresnel: v);
+double _is(GlassMaterial m) => m.innerShadow;
+GlassMaterial _sis(GlassMaterial m, double v) => m.copyWith(innerShadow: v);
+double _ts(GlassMaterial m) => m.tintStrength;
+GlassMaterial _sts(GlassMaterial m, double v) => m.copyWith(tintStrength: v);
+double _sa(GlassMaterial m) => m.saturation;
+GlassMaterial _ssa(GlassMaterial m, double v) => m.copyWith(saturation: v);
+double _fs(GlassMaterial m) => m.frostSigma;
+GlassMaterial _sfs(GlassMaterial m, double v) => m.copyWith(frostSigma: v);
+double _rs(GlassMaterial m) => m.rippleStrength;
+GlassMaterial _srs(GlassMaterial m, double v) => m.copyWith(rippleStrength: v);
+double _wl(GlassMaterial m) => m.wave.wavelength;
+GlassMaterial _swl(GlassMaterial m, double v) => m.copyWith(wave: m.wave.copyWith(wavelength: v));
+double _fq(GlassMaterial m) => m.wave.frequency;
+GlassMaterial _sfq(GlassMaterial m, double v) => m.copyWith(wave: m.wave.copyWith(frequency: v));
+double _re(GlassMaterial m) => m.wave.reach;
+GlassMaterial _sre(GlassMaterial m, double v) => m.copyWith(wave: m.wave.copyWith(reach: v));
+double _lt(GlassMaterial m) => m.wave.lifetime;
+GlassMaterial _slt(GlassMaterial m, double v) => m.copyWith(wave: m.wave.copyWith(lifetime: v));
+
+class TuningPanel extends StatelessWidget {
+	const TuningPanel({super.key, required this.material, required this.onChanged});
+
+	final GlassMaterial material;
+	final ValueChanged<GlassMaterial> onChanged;
+
+	@override
+	Widget build(BuildContext context) {
+		return Container(
+			width: 260,
+			color: const Color(0xCC101418),
+			child: ListView(
+				padding: const EdgeInsets.symmetric(vertical: 8),
+				children: [
+					for (final (group, knobs) in _knobs) ...[
+						Padding(
+							padding: const EdgeInsets.fromLTRB(12, 10, 12, 2),
+							child: Text(group, style: const TextStyle(color: Colors.white70, fontSize: 11, letterSpacing: 1)),
+						),
+						for (final k in knobs) _row(k),
+					],
+				],
+			),
+		);
+	}
+
+	Widget _row(_Knob k) {
+		final v = k.get(material);
+		return SizedBox(
+			height: 34,
+			child: Row(
+				children: [
+					SizedBox(
+						width: 96,
+						child: Padding(
+							padding: const EdgeInsets.only(left: 12),
+							child: Text(k.label, style: const TextStyle(color: Colors.white, fontSize: 12)),
+						),
+					),
+					Expanded(
+						child: SliderTheme(
+							data: const SliderThemeData(trackHeight: 2, thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6)),
+							child: Slider(
+								value: v.clamp(k.min, k.max),
+								min: k.min,
+								max: k.max,
+								onChanged: (nv) => onChanged(k.set(material, nv)),
+							),
+						),
+					),
+					SizedBox(
+						width: 44,
+						child: Text(v.toStringAsFixed(v < 10 ? 2 : 0), style: const TextStyle(color: Colors.white70, fontSize: 11)),
+					),
+				],
+			),
+		);
+	}
+}

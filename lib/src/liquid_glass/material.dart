@@ -21,6 +21,13 @@ final class GlassWave {
 
 	double get k => 2 * math.pi / wavelength;
 	double get omega => 2 * math.pi * frequency;
+
+	GlassWave copyWith({double? wavelength, double? frequency, double? reach, double? lifetime}) => GlassWave(
+		wavelength: wavelength ?? this.wavelength,
+		frequency: frequency ?? this.frequency,
+		reach: reach ?? this.reach,
+		lifetime: lifetime ?? this.lifetime,
+	);
 }
 
 /// Everything the shader needs beyond geometry, in logical pixels.
@@ -74,4 +81,44 @@ final class GlassMaterial {
 	/// Backdrop blur; applied by the engine, never reaches the shader.
 	final double frostSigma;
 	final GlassWave wave;
+
+	GlassMaterial copyWith({
+		double? smoothK,
+		double? edgeWidth,
+		double? height,
+		double? thickness,
+		double? aberration,
+		Color? tint,
+		double? tintStrength,
+		double? saturation,
+		double? specular,
+		double? shininess,
+		double? rim,
+		double? rimWidth,
+		double? fresnel,
+		double? innerShadow,
+		double? contentStrength,
+		double? rippleStrength,
+		double? frostSigma,
+		GlassWave? wave,
+	}) => GlassMaterial(
+		smoothK: smoothK ?? this.smoothK,
+		edgeWidth: edgeWidth ?? this.edgeWidth,
+		height: height ?? this.height,
+		thickness: thickness ?? this.thickness,
+		aberration: aberration ?? this.aberration,
+		tint: tint ?? this.tint,
+		tintStrength: tintStrength ?? this.tintStrength,
+		saturation: saturation ?? this.saturation,
+		specular: specular ?? this.specular,
+		shininess: shininess ?? this.shininess,
+		rim: rim ?? this.rim,
+		rimWidth: rimWidth ?? this.rimWidth,
+		fresnel: fresnel ?? this.fresnel,
+		innerShadow: innerShadow ?? this.innerShadow,
+		contentStrength: contentStrength ?? this.contentStrength,
+		rippleStrength: rippleStrength ?? this.rippleStrength,
+		frostSigma: frostSigma ?? this.frostSigma,
+		wave: wave ?? this.wave,
+	);
 }

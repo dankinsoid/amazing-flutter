@@ -3,6 +3,8 @@
 import 'package:amazing_flutter/amazing_flutter.dart';
 import 'package:flutter/material.dart';
 
+import 'tuning_panel.dart';
+
 void main() => runApp(const DemoApp());
 
 class DemoApp extends StatelessWidget {
@@ -30,9 +32,34 @@ class _LiquidGlassDemoState extends State<LiquidGlassDemo> {
 	Offset _blob = const Offset(200, 300);
 	final _ripples = GlassRipples();
 	bool _dragging = false;
+	GlassMaterial _material = const GlassMaterial();
+	bool _panel = true;
 
 	@override
 	Widget build(BuildContext context) {
+		return Stack(
+			children: [
+				Positioned.fill(child: _scene(context)),
+				if (_panel)
+					Positioned(
+						top: 0,
+						right: 0,
+						bottom: 0,
+						child: TuningPanel(material: _material, onChanged: (m) => setState(() => _material = m)),
+					),
+				Positioned(
+					top: 8,
+					right: _panel ? 268 : 8,
+					child: IconButton(
+						icon: Icon(_panel ? Icons.chevron_right : Icons.tune, color: Colors.white),
+						onPressed: () => setState(() => _panel = !_panel),
+					),
+				),
+			],
+		);
+	}
+
+	Widget _scene(BuildContext context) {
 		final size = MediaQuery.sizeOf(context);
 		final barY = size.height - 60;
 		return GestureDetector(
@@ -56,6 +83,7 @@ class _LiquidGlassDemoState extends State<LiquidGlassDemo> {
 					),
 				],
 				touches: _ripples.touches,
+				material: _material,
 				child: const _Backdrop(),
 			),
 		);
