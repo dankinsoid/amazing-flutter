@@ -16,12 +16,12 @@ abstract final class _U {
 	static const light = 2;
 	static const smoothK = 5, edgeWidth = 6, glassHeight = 7;
 	static const thickness = 8, aberration = 9, tint = 10, saturation = 14;
-	static const specular = 15, shininess = 16, rimWidth = 17, fresnel = 18, innerShadow = 19;
-	static const hasContent = 20, contentStrength = 25;
-	static const wave = 26;
-	static const touches = 30, touchStride = 4, maxTouches = 32;
-	static const shapes = 158, maxShapes = 8;
-	static const total = 254;
+	static const specular = 15, shininess = 16, rim = 17, rimWidth = 18, fresnel = 19, innerShadow = 20;
+	static const hasContent = 21, contentStrength = 26;
+	static const wave = 27;
+	static const touches = 31, touchStride = 4, maxTouches = 32;
+	static const shapes = 159, maxShapes = 8;
+	static const total = 255;
 }
 
 /// One merged glass surface over [child]; positions are logical px from its top-left.
@@ -122,6 +122,7 @@ class _LiquidGlassState extends State<LiquidGlass> with SingleTickerProviderStat
 		f[_U.saturation] = m.saturation;
 		f[_U.specular] = m.specular;
 		f[_U.shininess] = m.shininess;
+		f[_U.rim] = m.rim;
 		f[_U.rimWidth] = m.rimWidth * dpr;
 		f[_U.fresnel] = m.fresnel;
 		f[_U.innerShadow] = m.innerShadow;
@@ -143,7 +144,7 @@ class _LiquidGlassState extends State<LiquidGlass> with SingleTickerProviderStat
 			f[o] = t.position.dx * dpr;
 			f[o + 1] = t.position.dy * dpr;
 			f[o + 2] = t.ageAt(now);
-			f[o + 3] = t.amplitude * dpr;
+			f[o + 3] = t.amplitude * m.rippleStrength * dpr;
 		}
 
 		for (var i = 0; i < widget.shapes.length; i++) {

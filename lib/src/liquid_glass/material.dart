@@ -36,10 +36,12 @@ final class GlassMaterial {
 		this.saturation = 1.25,
 		this.specular = 0.6,
 		this.shininess = 40,
+		this.rim = 0.6,
 		this.rimWidth = 6,
 		this.fresnel = 0.25,
 		this.innerShadow = 0.15,
 		this.contentStrength = 0.6,
+		this.rippleStrength = 1,
 		this.frostSigma = 0,
 		this.wave = const GlassWave(),
 	});
@@ -59,12 +61,16 @@ final class GlassMaterial {
 	final double saturation;
 	final double specular;
 	final double shininess;
+	/// Light-facing edge highlight; 0 disables it.
+	final double rim;
 	/// Edge band for rim light and inner shadow.
 	final double rimWidth;
 	final double fresnel;
 	final double innerShadow;
 	/// Content displacement per pixel of water envelope.
 	final double contentStrength;
+	/// Multiplies every touch amplitude; 0 turns the water off.
+	final double rippleStrength;
 	/// Backdrop blur; applied by the engine, never reaches the shader.
 	final double frostSigma;
 	final GlassWave wave;

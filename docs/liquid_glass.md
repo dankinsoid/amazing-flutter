@@ -1,8 +1,7 @@
 # Liquid glass — design
 
-Phase 2 of the design: abstractions and data flow, no effect maths. The shader
-skeleton that mirrors this document is `shaders/liquid_glass.frag`; the maths goes
-into its stub bodies in phase 3. Settled decisions it builds on are in
+Design and data flow of `shaders/liquid_glass.frag` and its Dart binding in
+`lib/src/liquid_glass/`. Settled decisions it builds on are in
 `CONTEXT.md` (1: one scene-wide height field, 2: sum heights before the normal,
 3: one fat shader, 5: all maths in `.frag`).
 
@@ -29,8 +28,8 @@ Six stages; each boundary is where the nature of the data changes.
 | # | Stage | Input | Output | Reads |
 |---|---|---|---|---|
 | 1 | shape field | `p` (px), `uShapes`, `uSmoothK` | `sd` — signed distance, negative inside | — |
-| 2 | height field | `p`, `sd`, `uTouches`, `uWave`, `uEdgeWidth`, `uGlassHeight` | `h` (px); water envelope `env` (px) | — |
-| 3 | normal | `h` at `p ± step` (4 evaluations of stage 1+2) | `n` — unit vec3, +z toward the viewer | — |
+| 2 | height field | `p`, `sd`, `uTouches`, `uWave`, `uEdgeWidth`, `uGlassHeight` | `h` (px); water gradient and envelope `env` (px) | — |
+| 3 | normal | static terms at `p ± step` (4 evaluations of stage 1), water gradient analytic | `n` — unit vec3, +z toward the viewer | — |
 | 4 | sample | `p`, `n`, `env`, `uThickness`, `uAberration`, `uContentRect`, `uContentStrength` | `backdrop` rgba, `content` rgba (premultiplied) | sampler 0, sampler 1 |
 | 5 | light | `n`, `sd`, `uLight`, specular/rim/fresnel knobs | `Light {specular, rim, fresnel}` | — |
 | 6 | composite | everything above, `mask` from `fwidth(sd)`, tint/saturation/shadow knobs | `fragColor`, premultiplied | — |
@@ -43,32 +42,39 @@ sd = sceneSd(p)                       // 1
 aa = fwidth(sd)                       // before any branch: derivatives need uniform control flow
 sd > aa  ->  fragColor = vec4(0)      // early-out, 0 reads (see §6 for why transparent)
 mask = coverage(sd, aa)
-env = heightWater(p).y                // 2, centre only — content displacement scale
-n = normalAt(p)                       // 3, calls height() 4 times -> 4x sceneSd + 4x heightWater
+water = heightWater(p)                // 2, once: (h, dh/dx, dh/dy, envelope) over 32 sources
+n = normalAt(p, water.yz)             // 3, 4x heightStatic (sceneSd + profile) + analytic water gradient
 backdrop = sampleBackdrop(p, n)       // 4, 1 or 3 reads
 content  = sampleContent(p, n, env)   // 4, 0 or 1 read
 lt = lighting(n, sd)                  // 5
 fragColor = composite(...)            // 6
 ```
 
-Height is summed inside `height(p)` — glass profile, water rings, relief — and the
-normal is taken from the sum. No stage after 2 sees the terms separately; the only
-extra output of stage 2 is the water *envelope*, which scales content displacement so
-content is pixel-exact at rest.
+Height is summed before the normal is taken: the glass profile and relief through
+`heightStatic`, the water through its analytic gradient. No stage after 3 sees the
+terms separately; the only extra output of stage 2 is the water *envelope*, which
+scales content displacement so content is pixel-exact at rest.
+
+**Water model.** Each source is a travelling packet: a Gaussian of width
+`λ·(1 + age/τ)` around the front `v·age`, `cos` phase so the height is smooth at
+the centre, `exp(−age/τ)` decay and `1/√(1 + front/reach)` spreading. The distance
+is softened by half a wavelength for the finger's footprint. A stroke is a dense
+trail of such sources — one per 0.4 λ of travel — whose rings superpose into a
+smooth front (Huygens); `GlassRipples` owns that sampling rule.
 
 ## 3. Conventions
 
 - **Units are physical pixels.** Dart multiplies every logical value (positions,
   radii, widths, `k`, `λ`) by the device pixel ratio. `uWave.x` is rad/px, `uWave.y`
-  rad/s, `uWave.w` seconds; touches carry `age` in seconds (Dart computes `now − t0`,
+  rad/s, `uWave.w` seconds; sources carry `age` in seconds (Dart computes `now − t0`,
   so the shader has no clock and no float-precision drift).
 - **Coordinates** come from `FlutterFragCoord()` in the backdrop input's frame;
   `uSize` (engine-filled) is that input's size. Shapes are positioned in the same
   frame. Whether that frame is the whole screen or the filter's clip is verification
   item 2 — the answer decides what Dart subtracts before passing positions.
-- **GLES Y flip** is a float uniform applied to sampler 0 reads only (`backdropUv`).
-  The content sampler is our own `ui.Image`; whether it needs the flip too is
-  verification item 9.
+- **GLES Y flip** is compile-time (`IMPELLER_TARGET_OPENGLES`), applied to
+  sampler 0 reads only. The content sampler is our own `ui.Image`; whether it
+  needs the flip too is verification item 9.
 - **No int/bool uniforms.** Shape kind and mode toggles are floats compared against
   half-way thresholds (`kind < 1.5`), `uAberration < 1e-4` means "single read",
   `uHasContent > 0.5` means "sampler 1 is valid".
@@ -86,31 +92,34 @@ Declaration order is the `setFloat` index. Scalars first, arrays last, so changi
 | Index | Name | Type | Floats | Meaning |
 |---|---|---|---|---|
 | 0 | `uSize` | vec2 | 2 | input size, px — **engine-filled** by `ImageFilter.shader` |
-| 2 | `uFlipY` | float | 1 | 1.0 on GLES: sampler 0 is upside-down |
-| 3 | `uLight` | vec3 | 3 | direction to the light, +z toward the viewer; shared with the holographic card |
-| 6 | `uSmoothK` | float | 1 | `smin` radius, px |
-| 7 | `uEdgeWidth` | float | 1 | squircle ramp width from the edge inward, px |
-| 8 | `uGlassHeight` | float | 1 | profile amplitude, px — sets the normal's slope independently of the refraction offset |
-| 9 | `uThickness` | float | 1 | backdrop refraction offset at unit slope, px |
-| 10 | `uAberration` | float | 1 | per-channel offset spread; 0 = single read |
-| 11 | `uTint` | vec4 | 4 | rgb, strength |
-| 15 | `uSaturation` | float | 1 | 1 = unchanged |
-| 16 | `uSpecular` | float | 1 | Blinn-Phong intensity |
-| 17 | `uShininess` | float | 1 | Blinn-Phong exponent |
+| 2 | `uLight` | vec3 | 3 | direction to the light, +z toward the viewer; shared with the holographic card |
+| 5 | `uSmoothK` | float | 1 | `smin` radius, px |
+| 6 | `uEdgeWidth` | float | 1 | squircle ramp width from the edge inward, px |
+| 7 | `uGlassHeight` | float | 1 | profile amplitude, px — sets the normal's slope independently of the refraction offset |
+| 8 | `uThickness` | float | 1 | backdrop refraction offset at unit slope, px |
+| 9 | `uAberration` | float | 1 | per-channel offset spread; 0 = single read |
+| 10 | `uTint` | vec4 | 4 | rgb, strength |
+| 14 | `uSaturation` | float | 1 | 1 = unchanged |
+| 15 | `uSpecular` | float | 1 | Blinn-Phong intensity |
+| 16 | `uShininess` | float | 1 | Blinn-Phong exponent |
+| 17 | `uRim` | float | 1 | light-facing edge highlight intensity |
 | 18 | `uRimWidth` | float | 1 | edge band for rim light and inner shadow, px |
 | 19 | `uFresnel` | float | 1 | Fresnel strength toward the edge |
 | 20 | `uInnerShadow` | float | 1 | inner edge shadow strength |
 | 21 | `uHasContent` | float | 1 | > 0.5: sampler 1 holds the content snapshot |
 | 22 | `uContentRect` | vec4 | 4 | x, y, w, h in px — where sampler 1 sits on screen |
 | 26 | `uContentStrength` | float | 1 | content displacement per px of water envelope |
-| 27 | `uWave` | vec4 | 4 | k (rad/px), ω (rad/s), λ (px), τ (s) — shared by all touches |
-| 31 | `uTouches[4]` | vec4[4] | 16 | per touch: x, y, age (s), amplitude (px); amplitude 0 = empty |
-| 47 | `uShapes[24]` | vec4[24] | 96 | 3 slots per shape, see below |
-| — | **total** | | **143** | |
+| 27 | `uWave` | vec4 | 4 | k (rad/px), ω (rad/s), reach (px), τ (s) — shared by all sources |
+| 31 | `uTouches[32]` | vec4[32] | 128 | per source: x, y, age (s), amplitude (px); amplitude 0 = empty |
+| 159 | `uShapes[24]` | vec4[24] | 96 | 3 slots per shape, see below |
+| — | **total** | | **255** | |
 | sampler 0 | `uBackdrop` | sampler2D | | **engine-filled**; already blurred when frost is composed |
 | sampler 1 | `uContent` | sampler2D | | content snapshot, premultiplied, `setImageSampler(1, …)` |
 
-Shape `i` occupies floats `47 + 12·i` … `47 + 12·i + 11`:
+GLES flips sampler 0 vertically; the shader corrects it under the compile-time
+`IMPELLER_TARGET_OPENGLES` macro, so no uniform is spent on it.
+
+Shape `i` occupies floats `159 + 12·i` … `159 + 12·i + 11`:
 
 | Slot | Components | circle | capsule | rounded box | bent capsule |
 |---|---|---|---|---|---|
@@ -138,13 +147,13 @@ float sceneSd(vec2 p);                              // smin-union of MAX_SHAPES
 // 2. height field
 float glassProfile(float x);            // (1 - (1 - x)^4)^(1/4), x in [0, 1]
 float heightGlass(float sd);            // uGlassHeight * glassProfile(-sd / uEdgeWidth)
-vec2  waterRing(vec2 p, vec4 touch);    // .x height, .y envelope
-vec2  heightWater(vec2 p);              // sum over MAX_TOUCHES
+vec4  waterRing(vec2 p, vec4 source);   // (height, dh/dx, dh/dy, envelope), analytic gradient
+vec4  heightWater(vec2 p);              // sum over MAX_TOUCHES
 float heightRelief(vec2 p, float sd);   // v2 slot, 0 in v1
-float height(vec2 p);                   // heightGlass + heightWater.x + heightRelief
+float heightStatic(vec2 p);             // heightGlass + heightRelief — the terms without a closed-form gradient
 
 // 3. normal
-vec3 normalAt(vec2 p);                  // central differences, 4 x height()
+vec3 normalAt(vec2 p, vec2 waterGrad);  // central differences on heightStatic, plus the water gradient
 
 // 4. sample
 vec2 backdropUv(vec2 p);                            // px -> uv, GLES flip
@@ -298,17 +307,17 @@ what; the skeleton as it stands is the test vehicle for 1–5.
 | Region | Texture reads | ALU, dominant terms |
 |---|---|---|
 | outside the mask (`sd > aa`) | 0 | 8 × `sdShape` + 7 × `smin` + `fwidth` |
-| inside the mask, base | 1 | 5 × (8 `sdShape` + 7 `smin`) + 5 × 4 `waterRing` (1 sin, 2 exp each) + lighting (2 pow) |
+| inside the mask, base | 1 | 5 × (8 `sdShape` + 7 `smin`) + 32 × `waterRing` (sin, cos, 2 exp, rsqrt) + lighting (2 pow) |
 | + aberration | 3 | + 2 uv transforms |
 | + content | +1 | + rect test |
 | frost (engine blur, before sampler 0) | blur kernel per px over the whole filter area | — |
 
 Rough order: outside ≈ 2×10² ops per px over the whole screen; inside ≈ 1–2×10³ ops
 over the glass area. Refraction reads are scattered, so the inside cost is dominated
-by cache misses rather than ALU. The 5× on stages 1–2 comes from the numerical
-normal; an analytic gradient (return `vec3(sd, ∇sd)` from stage 1, differentiate the
-water rings in closed form) cuts it to 1× and is the first optimisation if profiling
-shows the raster thread ALU-bound. Empty shape and touch slots cost one uniform
+by cache misses rather than ALU. The 5× on stage 1 comes from the numerical
+normal of the glass profile; the water gradient is already analytic. Returning
+`vec3(sd, ∇sd)` from stage 1 would cut that to 1× and is the next optimisation if
+profiling shows the raster thread ALU-bound. Empty shape and touch slots cost one uniform
 compare each.
 
 ## 10. Open questions

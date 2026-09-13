@@ -50,26 +50,27 @@ uniform vec4 uTint;          // [10..13] rgb, strength
 uniform float uSaturation;   // [14] 1 = unchanged
 uniform float uSpecular;     // [15] Blinn-Phong intensity
 uniform float uShininess;    // [16] Blinn-Phong exponent
-uniform float uRimWidth;     // [17] edge band for rim and inner shadow, px
-uniform float uFresnel;      // [18]
-uniform float uInnerShadow;  // [19]
+uniform float uRim;          // [17] rim light intensity
+uniform float uRimWidth;     // [18] edge band for rim and inner shadow, px
+uniform float uFresnel;      // [19]
+uniform float uInnerShadow;  // [20]
 
-// [20] content
-uniform float uHasContent;       // [20] > 0.5: sampler 1 holds the content snapshot
-uniform vec4 uContentRect;       // [21..24] x, y, w, h in px; where sampler 1 sits on screen
-uniform float uContentStrength;  // [25] content displacement per px of water envelope
+// [21] content
+uniform float uHasContent;       // [21] > 0.5: sampler 1 holds the content snapshot
+uniform vec4 uContentRect;       // [22..25] x, y, w, h in px; where sampler 1 sits on screen
+uniform float uContentStrength;  // [26] content displacement per px of water envelope
 
-// [26] water, shared by all touches: k rad/px, omega rad/s, reach px, tau s
+// [27] water, shared by all touches: k rad/px, omega rad/s, reach px, tau s
 uniform vec4 uWave;
 
-// [30] ripple sources: x, y, age s, amplitude px; amplitude 0 = empty slot.
+// [31] ripple sources: x, y, age s, amplitude px; amplitude 0 = empty slot.
 // A stroke is a dense trail of these (Huygens); spacing must stay under half a wavelength.
 uniform vec4 uTouches[MAX_TOUCHES];
 
-// [158] shapes, SHAPE_STRIDE slots each; kind 0 = empty slot
+// [159] shapes, SHAPE_STRIDE slots each; kind 0 = empty slot
 uniform vec4 uShapes[MAX_SHAPES * SHAPE_STRIDE];
 
-// Total: 254 floats.
+// Total: 255 floats.
 
 uniform sampler2D uBackdrop;  // sampler 0, engine-filled; already blurred when frost is composed
 uniform sampler2D uContent;   // sampler 1, content snapshot, premultiplied
@@ -282,7 +283,7 @@ Light lighting(vec3 n, float sd) {
 	float band = 1.0 - smoothstep(0.0, uRimWidth, -sd);
 	Light lt;
 	lt.specular = uSpecular * pow(max(dot(n, h), 0.0), uShininess);
-	lt.rim = uSpecular * band * max(dot(n, l), 0.0);
+	lt.rim = uRim * band * max(dot(n, l), 0.0);
 	lt.fresnel = uFresnel * pow(1.0 - max(n.z, 0.0), 5.0);
 	return lt;
 }
