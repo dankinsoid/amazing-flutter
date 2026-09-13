@@ -59,7 +59,7 @@ uniform float uHasContent;       // [20] > 0.5: sampler 1 holds the content snap
 uniform vec4 uContentRect;       // [21..24] x, y, w, h in px; where sampler 1 sits on screen
 uniform float uContentStrength;  // [25] content displacement per px of water envelope
 
-// [26] water, shared by all touches: k rad/px, omega rad/s, lambda px, tau s
+// [26] water, shared by all touches: k rad/px, omega rad/s, reach px, tau s
 uniform vec4 uWave;
 
 // [30] touches, 2 slots each: (a.xy, b.xy), (age at a, age at b, amplitude px, -).
@@ -180,19 +180,23 @@ float heightGlass(float sd) {
 }
 
 // One source: .x height, .y envelope (amplitude without the oscillation).
+// A travelling packet: the crest sits at the front and the source calms behind it.
 vec2 waterRing(vec2 p, vec4 seg, vec4 t) {
 	if (t.z <= 0.0) return vec2(0.0);
-	float k = uWave.x, omega = uWave.y, lambda = uWave.z, tau = uWave.w;
+	float k = uWave.x, omega = uWave.y, reach = uWave.z, tau = uWave.w;
+	float wavelength = 2.0 * PI / k;
 	vec2 pa = p - seg.xy, ba = seg.zw - seg.xy;
 	float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
 	float r = length(pa - ba * h);
+	// The finger has a footprint: soften r so the height is smooth across the stroke.
+	float s = 0.5 * wavelength;
+	r = sqrt(r * r + s * s) - s;
 	float age = mix(t.x, t.y, h);
-	float amp = t.z;
-	// Nothing ahead of the front, or a tap paints rings everywhere at once.
 	float front = (omega / k) * age;
-	float gate = 1.0 - smoothstep(front - 2.0 * PI / k, front, r);
-	float env = amp * exp(-r / lambda) * exp(-age / tau) * gate;
-	return vec2(env * sin(k * r - omega * age), env);
+	float width = wavelength * (1.0 + age / tau);
+	float d = (r - front) / width;
+	float env = t.z * exp(-d * d) * exp(-age / tau) * inversesqrt(1.0 + front / reach);
+	return vec2(env * cos(k * (r - front)), env);
 }
 
 #define TOUCH(i) w += waterRing(p, uTouches[(i) * 2], uTouches[(i) * 2 + 1])

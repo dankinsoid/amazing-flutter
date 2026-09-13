@@ -42,7 +42,9 @@ class _LiquidGlassDemoState extends State<LiquidGlassDemo> {
 
 	void _stroke(Offset at) {
 		_prune();
-		final last = _stroking && _touches.isNotEmpty ? _touches.last : null;
+		// A tap with a little slide is a stroke: continue the tap's source, don't stack a second one.
+		final recent = _touches.isNotEmpty && DateTime.now().difference(_touches.last.endedAt) < const Duration(milliseconds: 150);
+		final last = _stroking || recent ? _touches.last : null;
 		if (last == null || (last.end - last.start).distance > _segmentLength) {
 			_touches.add(GlassTouch(start: last?.end ?? at, amplitude: 2));
 		}

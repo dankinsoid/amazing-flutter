@@ -14,7 +14,7 @@ final class GlassWave {
 
 	final double wavelength;
 	final double frequency;
-	/// Distance over which the amplitude falls by `e`.
+	/// Spreading scale: amplitude halves once the front has travelled 3× this.
 	final double reach;
 	/// Time over which the amplitude falls by `e`.
 	final double lifetime;
