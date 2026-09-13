@@ -83,7 +83,8 @@ varying radius is required.
 
 **4. Water UI.** Glass + water + metaballs in the shared height field. `smin` is
 needed here anyway — without it two shapes intersect with a visible crease, so
-neither merging nor the collapse-into-a-pill morph works.
+neither merging nor the collapse-into-a-pill morph works. Shader design and
+uniform layout: `docs/liquid_glass.md`, skeleton in `shaders/liquid_glass.frag`.
 
 **5. Fold.** The iPhone Duo target. Progress is driven by gesture, settled with a
 spring — never a fixed duration.
