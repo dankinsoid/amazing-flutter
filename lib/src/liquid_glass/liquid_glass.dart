@@ -19,9 +19,9 @@ abstract final class _U {
 	static const specular = 15, shininess = 16, rimWidth = 17, fresnel = 18, innerShadow = 19;
 	static const hasContent = 20, contentStrength = 25;
 	static const wave = 26;
-	static const touches = 30, touchStride = 8, maxTouches = 4;
-	static const shapes = 62, maxShapes = 8;
-	static const total = 158;
+	static const touches = 30, touchStride = 4, maxTouches = 32;
+	static const shapes = 158, maxShapes = 8;
+	static const total = 254;
 }
 
 /// One merged glass surface over [child]; positions are logical px from its top-left.
@@ -140,13 +140,10 @@ class _LiquidGlassState extends State<LiquidGlass> with SingleTickerProviderStat
 		for (var i = 0; i < touches.length; i++) {
 			final t = touches[i];
 			final o = _U.touches + i * _U.touchStride;
-			f[o] = t.start.dx * dpr;
-			f[o + 1] = t.start.dy * dpr;
-			f[o + 2] = t.end.dx * dpr;
-			f[o + 3] = t.end.dy * dpr;
-			f[o + 4] = _seconds(now, t.startedAt);
-			f[o + 5] = _seconds(now, t.endedAt);
-			f[o + 6] = t.amplitude * dpr;
+			f[o] = t.position.dx * dpr;
+			f[o + 1] = t.position.dy * dpr;
+			f[o + 2] = t.ageAt(now);
+			f[o + 3] = t.amplitude * dpr;
 		}
 
 		for (var i = 0; i < widget.shapes.length; i++) {
@@ -196,8 +193,6 @@ class _LiquidGlassState extends State<LiquidGlass> with SingleTickerProviderStat
 		);
 	}
 }
-
-double _seconds(DateTime now, DateTime then) => now.difference(then).inMicroseconds / 1e6;
 
 /// Skia fallback: flat tinted shapes, no refraction, no merging.
 class _FlatGlassPainter extends CustomPainter {

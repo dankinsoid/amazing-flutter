@@ -26,47 +26,26 @@ class LiquidGlassDemo extends StatefulWidget {
 
 class _LiquidGlassDemoState extends State<LiquidGlassDemo> {
 	static const _blobRadius = 70.0;
-	static const _segmentLength = 80.0;
 
 	Offset _blob = const Offset(200, 300);
-	final List<GlassTouch> _touches = [];
+	final _ripples = GlassRipples();
 	bool _dragging = false;
-	bool _stroking = false;
-
-	void _prune() => _touches.removeWhere((t) => !t.isAliveAt(DateTime.now(), const GlassWave()));
-
-	void _tap(Offset at) {
-		_prune();
-		_touches.add(GlassTouch(start: at));
-	}
-
-	void _stroke(Offset at) {
-		_prune();
-		// A tap with a little slide is a stroke: continue the tap's source, don't stack a second one.
-		final recent = _touches.isNotEmpty && DateTime.now().difference(_touches.last.endedAt) < const Duration(milliseconds: 150);
-		final last = _stroking || recent ? _touches.last : null;
-		if (last == null || (last.end - last.start).distance > _segmentLength) {
-			_touches.add(GlassTouch(start: last?.end ?? at, amplitude: 2));
-		}
-		_touches.last = _touches.last.extendTo(at);
-		_stroking = true;
-	}
 
 	@override
 	Widget build(BuildContext context) {
 		final size = MediaQuery.sizeOf(context);
 		final barY = size.height - 60;
 		return GestureDetector(
-			onTapDown: (d) => setState(() => _tap(d.localPosition)),
+			onTapDown: (d) => setState(() => _ripples.tap(d.localPosition)),
 			onPanStart: (d) => _dragging = (d.localPosition - _blob).distance < _blobRadius,
 			onPanUpdate: (d) => setState(() {
 				if (_dragging) {
 					_blob += d.delta;
 				} else {
-					_stroke(d.localPosition);
+					_ripples.drag(d.localPosition);
 				}
 			}),
-			onPanEnd: (_) => _stroking = false,
+			onPanEnd: (_) => _ripples.end(),
 			child: LiquidGlass(
 				shapes: [
 					GlassCapsule(a: Offset(48, barY), b: Offset(size.width - 48, barY), radius: 32),
@@ -76,7 +55,7 @@ class _LiquidGlassDemoState extends State<LiquidGlassDemo> {
 						cornerRadius: 28,
 					),
 				],
-				touches: _touches,
+				touches: _ripples.touches,
 				child: const _Backdrop(),
 			),
 		);

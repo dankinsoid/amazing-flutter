@@ -11,7 +11,7 @@ precision highp float;
 // Design and uniform table: docs/liquid_glass.md.
 
 #define MAX_SHAPES 8
-#define MAX_TOUCHES 4
+#define MAX_TOUCHES 32
 // vec4 slots per shape: (kind, radius, bend, -), (p0.xy, p1.xy), (p2.xy, -, -).
 #define SHAPE_STRIDE 3
 
@@ -62,15 +62,14 @@ uniform float uContentStrength;  // [25] content displacement per px of water en
 // [26] water, shared by all touches: k rad/px, omega rad/s, reach px, tau s
 uniform vec4 uWave;
 
-// [30] touches, 2 slots each: (a.xy, b.xy), (age at a, age at b, amplitude px, -).
-// A tap is a == b; a stroke sweeps a -> b, so age is interpolated along it.
-// Amplitude 0 = empty slot.
-uniform vec4 uTouches[MAX_TOUCHES * 2];
+// [30] ripple sources: x, y, age s, amplitude px; amplitude 0 = empty slot.
+// A stroke is a dense trail of these (Huygens); spacing must stay under half a wavelength.
+uniform vec4 uTouches[MAX_TOUCHES];
 
-// [62] shapes, SHAPE_STRIDE slots each; kind 0 = empty slot
+// [158] shapes, SHAPE_STRIDE slots each; kind 0 = empty slot
 uniform vec4 uShapes[MAX_SHAPES * SHAPE_STRIDE];
 
-// Total: 158 floats.
+// Total: 254 floats.
 
 uniform sampler2D uBackdrop;  // sampler 0, engine-filled; already blurred when frost is composed
 uniform sampler2D uContent;   // sampler 1, content snapshot, premultiplied
@@ -179,34 +178,41 @@ float heightGlass(float sd) {
 	return uGlassHeight * glassProfile(x);
 }
 
-// One source: .x height, .y envelope (amplitude without the oscillation).
-// A travelling packet: the crest sits at the front and the source calms behind it.
-vec2 waterRing(vec2 p, vec4 seg, vec4 t) {
-	if (t.z <= 0.0) return vec2(0.0);
+// One source: (height, d/dx, d/dy, envelope). A travelling packet: the crest
+// sits at the front and the source calms behind it. The gradient is analytic so
+// the trail costs one evaluation per source, not five.
+vec4 waterRing(vec2 p, vec4 t) {
+	if (t.w <= 0.0) return vec4(0.0);
 	float k = uWave.x, omega = uWave.y, reach = uWave.z, tau = uWave.w;
 	float wavelength = 2.0 * PI / k;
-	vec2 pa = p - seg.xy, ba = seg.zw - seg.xy;
-	float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
-	float r = length(pa - ba * h);
-	// The finger has a footprint: soften r so the height is smooth across the stroke.
+	vec2 pc = p - t.xy;
+	// The finger has a footprint: soften r so the height is smooth at the source.
 	float s = 0.5 * wavelength;
-	r = sqrt(r * r + s * s) - s;
-	float age = mix(t.x, t.y, h);
+	float q = sqrt(dot(pc, pc) + s * s);
+	float r = q - s;
+	float age = t.z;
 	float front = (omega / k) * age;
 	float width = wavelength * (1.0 + age / tau);
 	float d = (r - front) / width;
-	float env = t.z * exp(-d * d) * exp(-age / tau) * inversesqrt(1.0 + front / reach);
-	return vec2(env * cos(k * (r - front)), env);
+	float env = t.w * exp(-d * d) * exp(-age / tau) * inversesqrt(1.0 + front / reach);
+	float ph = k * (r - front);
+	float c = cos(ph), sn = sin(ph);
+	float dhdr = env * (-2.0 * d / width * c - k * sn);
+	return vec4(env * c, dhdr * pc / q, env);
 }
 
-#define TOUCH(i) w += waterRing(p, uTouches[(i) * 2], uTouches[(i) * 2 + 1])
+#define TOUCH(i) w += waterRing(p, uTouches[i])
 
-vec2 heightWater(vec2 p) {
-	vec2 w = vec2(0.0);
-	TOUCH(0);
-	TOUCH(1);
-	TOUCH(2);
-	TOUCH(3);
+vec4 heightWater(vec2 p) {
+	vec4 w = vec4(0.0);
+	TOUCH(0);  TOUCH(1);  TOUCH(2);  TOUCH(3);
+	TOUCH(4);  TOUCH(5);  TOUCH(6);  TOUCH(7);
+	TOUCH(8);  TOUCH(9);  TOUCH(10); TOUCH(11);
+	TOUCH(12); TOUCH(13); TOUCH(14); TOUCH(15);
+	TOUCH(16); TOUCH(17); TOUCH(18); TOUCH(19);
+	TOUCH(20); TOUCH(21); TOUCH(22); TOUCH(23);
+	TOUCH(24); TOUCH(25); TOUCH(26); TOUCH(27);
+	TOUCH(28); TOUCH(29); TOUCH(30); TOUCH(31);
 	return w;
 }
 
@@ -215,20 +221,21 @@ float heightRelief(vec2 p, float sd) {
 	return 0.0;
 }
 
-// All terms sum here, before the normal is taken.
-float height(vec2 p) {
+// The terms without an analytic gradient.
+float heightStatic(vec2 p) {
 	float sd = sceneSd(p);
-	return heightGlass(sd) + heightWater(p).x + heightRelief(p, sd);
+	return heightGlass(sd) + heightRelief(p, sd);
 }
 
 // ---- 3. Normal ----
 
-vec3 normalAt(vec2 p) {
+// Gradient of the summed height: static terms by central differences, water analytic.
+vec3 normalAt(vec2 p, vec2 waterGrad) {
 	vec2 dx = vec2(NORMAL_STEP, 0.0);
 	vec2 dy = vec2(0.0, NORMAL_STEP);
-	float gx = height(p + dx) - height(p - dx);
-	float gy = height(p + dy) - height(p - dy);
-	return normalize(vec3(-gx, -gy, 2.0 * NORMAL_STEP));
+	float gx = (heightStatic(p + dx) - heightStatic(p - dx)) / (2.0 * NORMAL_STEP);
+	float gy = (heightStatic(p + dy) - heightStatic(p - dy)) / (2.0 * NORMAL_STEP);
+	return normalize(vec3(-(gx + waterGrad.x), -(gy + waterGrad.y), 1.0));
 }
 
 // ---- 4. Sample ----
@@ -313,8 +320,9 @@ void main() {
 		return;
 	}
 	float mask = coverage(sd, aa);
-	float waveEnv = heightWater(p).y;
-	vec3 n = normalAt(p);
+	vec4 water = heightWater(p);
+	vec3 n = normalAt(p, water.yz);
+	float waveEnv = water.w;
 	vec4 backdrop = sampleBackdrop(p, n);
 	vec4 content = sampleContent(p, n, waveEnv);
 	Light lt = lighting(n, sd);
