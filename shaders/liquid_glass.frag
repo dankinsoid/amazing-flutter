@@ -28,46 +28,47 @@ const float FAR = 1e5;
 // Central-difference step for the normal, px.
 const float NORMAL_STEP = 1.0;
 
+const float PI = 3.14159265;
+
 // ---- Uniforms. Declaration order is the setFloat index. ----
 
 // [0] engine: input size in px, filled by ImageFilter.shader.
 uniform vec2 uSize;
 
 // [2] frame
-uniform float uFlipY;   // [2] 1.0 on GLES: sampler 0 is upside-down
-uniform vec3 uLight;    // [3..5] direction to the light, +z toward the viewer
+uniform vec3 uLight;    // [2..4] direction to the light, +z toward the viewer
 
-// [6] field
-uniform float uSmoothK;      // [6] smin radius, px
-uniform float uEdgeWidth;    // [7] squircle ramp width from the edge inward, px
-uniform float uGlassHeight;  // [8] profile amplitude, px; sets the normal slope
+// [5] field
+uniform float uSmoothK;      // [5] smin radius, px
+uniform float uEdgeWidth;    // [6] squircle ramp width from the edge inward, px
+uniform float uGlassHeight;  // [7] profile amplitude, px; sets the normal slope
 
-// [9] material
-uniform float uThickness;    // [9] refraction offset at unit slope, px
-uniform float uAberration;   // [10] per-channel offset spread; 0 = single read
-uniform vec4 uTint;          // [11..14] rgb, strength
-uniform float uSaturation;   // [15] 1 = unchanged
-uniform float uSpecular;     // [16] Blinn-Phong intensity
-uniform float uShininess;    // [17] Blinn-Phong exponent
-uniform float uRimWidth;     // [18] edge band for rim and inner shadow, px
-uniform float uFresnel;      // [19]
-uniform float uInnerShadow;  // [20]
+// [8] material
+uniform float uThickness;    // [8] refraction offset at unit slope, px
+uniform float uAberration;   // [9] per-channel offset spread; 0 = single read
+uniform vec4 uTint;          // [10..13] rgb, strength
+uniform float uSaturation;   // [14] 1 = unchanged
+uniform float uSpecular;     // [15] Blinn-Phong intensity
+uniform float uShininess;    // [16] Blinn-Phong exponent
+uniform float uRimWidth;     // [17] edge band for rim and inner shadow, px
+uniform float uFresnel;      // [18]
+uniform float uInnerShadow;  // [19]
 
-// [21] content
-uniform float uHasContent;       // [21] > 0.5: sampler 1 holds the content snapshot
-uniform vec4 uContentRect;       // [22..25] x, y, w, h in px; where sampler 1 sits on screen
-uniform float uContentStrength;  // [26] content displacement per px of water envelope
+// [20] content
+uniform float uHasContent;       // [20] > 0.5: sampler 1 holds the content snapshot
+uniform vec4 uContentRect;       // [21..24] x, y, w, h in px; where sampler 1 sits on screen
+uniform float uContentStrength;  // [25] content displacement per px of water envelope
 
-// [27] water, shared by all touches: k rad/px, omega rad/s, lambda px, tau s
+// [26] water, shared by all touches: k rad/px, omega rad/s, lambda px, tau s
 uniform vec4 uWave;
 
-// [31] touches: x, y, age s, amplitude px; amplitude 0 = empty slot
+// [30] touches: x, y, age s, amplitude px; amplitude 0 = empty slot
 uniform vec4 uTouches[MAX_TOUCHES];
 
-// [47] shapes, SHAPE_STRIDE slots each; kind 0 = empty slot
+// [46] shapes, SHAPE_STRIDE slots each; kind 0 = empty slot
 uniform vec4 uShapes[MAX_SHAPES * SHAPE_STRIDE];
 
-// Total: 143 floats.
+// Total: 142 floats.
 
 uniform sampler2D uBackdrop;  // sampler 0, engine-filled; already blurred when frost is composed
 uniform sampler2D uContent;   // sampler 1, content snapshot, premultiplied
@@ -77,24 +78,61 @@ out vec4 fragColor;
 // ---- 1. Shape field ----
 
 float sdCircle(vec2 p, vec2 c, float r) {
-	return FAR;
+	return length(p - c) - r;
+}
+
+float sdSegment(vec2 p, vec2 a, vec2 b) {
+	vec2 pa = p - a, ba = b - a;
+	float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
+	return length(pa - ba * h);
 }
 
 float sdCapsule(vec2 p, vec2 a, vec2 b, float r) {
-	return FAR;
+	return sdSegment(p, a, b) - r;
 }
 
 float sdRoundedBox(vec2 p, vec2 c, vec2 halfSize, float r) {
-	return FAR;
+	vec2 q = abs(p - c) - halfSize + r;
+	return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+
+float cross2(vec2 a, vec2 b) {
+	return a.x * b.y - a.y * b.x;
 }
 
 // Capsule swept along a -> c -> b, corner at c rounded by `bend`.
+// The path is two segments joined by a tangent arc, so plain min is the exact distance.
 float sdBentCapsule(vec2 p, vec2 a, vec2 c, vec2 b, float r, float bend) {
-	return FAR;
+	vec2 u1 = normalize(c - a);
+	vec2 u2 = normalize(b - c);
+	float turn = cross2(u1, u2);
+	float cosT = clamp(dot(u1, u2), -1.0, 1.0);
+	if (bend <= 0.0 || abs(turn) < 1e-4) {
+		return min(sdSegment(p, a, c), sdSegment(p, c, b)) - r;
+	}
+	// Tangent length from the corner; capped so the arc fits both legs.
+	float t = bend * sqrt((1.0 - cosT) / (1.0 + cosT));
+	float tMax = min(length(c - a), length(b - c));
+	if (t > tMax) {
+		bend *= tMax / t;
+		t = tMax;
+	}
+	vec2 t1 = c - u1 * t;
+	vec2 t2 = c + u2 * t;
+	vec2 n1 = vec2(-u1.y, u1.x) * sign(turn);
+	vec2 cen = t1 + n1 * bend;
+	float d = min(sdSegment(p, a, t1), sdSegment(p, t2, b));
+	vec2 v = p - cen;
+	vec2 e1 = t1 - cen, e2 = t2 - cen;
+	bool inWedge = cross2(e1, v) * sign(turn) >= 0.0 && cross2(v, e2) * sign(turn) >= 0.0;
+	if (inWedge) d = min(d, abs(length(v) - bend));
+	return d - r;
 }
 
 float smin(float a, float b, float k) {
-	return min(a, b);
+	if (k <= 0.0) return min(a, b);
+	float h = max(k - abs(a - b), 0.0) / k;
+	return min(a, b) - h * h * k * 0.25;
 }
 
 float sdShape(vec2 p, vec4 s0, vec4 s1, vec4 s2) {
@@ -129,16 +167,27 @@ float sceneSd(vec2 p) {
 
 // Apple's glass profile, x in [0, 1]: (1 - (1 - x)^4)^(1/4).
 float glassProfile(float x) {
-	return 0.0;
+	float y = 1.0 - x;
+	float y2 = y * y;
+	return sqrt(sqrt(1.0 - y2 * y2));
 }
 
 float heightGlass(float sd) {
-	return 0.0;
+	float x = clamp(-sd / max(uEdgeWidth, 1e-3), 0.0, 1.0);
+	return uGlassHeight * glassProfile(x);
 }
 
 // One ring: .x height, .y envelope (amplitude without the oscillation).
 vec2 waterRing(vec2 p, vec4 touch) {
-	return vec2(0.0);
+	if (touch.w <= 0.0) return vec2(0.0);
+	float k = uWave.x, omega = uWave.y, lambda = uWave.z, tau = uWave.w;
+	float r = length(p - touch.xy);
+	float age = touch.z;
+	// Nothing ahead of the front, or a tap paints rings everywhere at once.
+	float front = (omega / k) * age;
+	float gate = 1.0 - smoothstep(front - 2.0 * PI / k, front, r);
+	float env = touch.w * exp(-r / lambda) * exp(-age / tau) * gate;
+	return vec2(env * sin(k * r - omega * age), env);
 }
 
 #define TOUCH(i) w += waterRing(p, uTouches[i])
@@ -177,7 +226,9 @@ vec3 normalAt(vec2 p) {
 
 vec2 backdropUv(vec2 p) {
 	vec2 uv = p / uSize;
-	uv.y = mix(uv.y, 1.0 - uv.y, uFlipY);
+#ifdef IMPELLER_TARGET_OPENGLES
+	uv.y = 1.0 - uv.y;
+#endif
 	return uv;
 }
 
@@ -210,11 +261,14 @@ struct Light {
 };
 
 Light lighting(vec3 n, float sd) {
-	Light l;
-	l.specular = 0.0;
-	l.rim = 0.0;
-	l.fresnel = 0.0;
-	return l;
+	vec3 l = normalize(uLight);
+	vec3 h = normalize(l + vec3(0.0, 0.0, 1.0));
+	float band = 1.0 - smoothstep(0.0, uRimWidth, -sd);
+	Light lt;
+	lt.specular = uSpecular * pow(max(dot(n, h), 0.0), uShininess);
+	lt.rim = uSpecular * band * max(dot(n, l), 0.0);
+	lt.fresnel = uFresnel * pow(1.0 - max(n.z, 0.0), 5.0);
+	return lt;
 }
 
 // ---- 6. Composite ----
@@ -224,11 +278,16 @@ float coverage(float sd, float aa) {
 }
 
 vec3 adjustColor(vec3 c) {
-	return c;
+	float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
+	c = mix(vec3(luma), c, uSaturation);
+	return mix(c, uTint.rgb, uTint.a);
 }
 
 vec4 composite(vec4 backdrop, vec4 content, Light lt, float sd, float mask) {
 	vec3 glass = adjustColor(backdrop.rgb);
+	float band = 1.0 - smoothstep(0.0, uRimWidth, -sd);
+	glass *= 1.0 - uInnerShadow * band;
+	glass += vec3(lt.fresnel + lt.specular + lt.rim);
 	vec3 c = content.rgb + glass * (1.0 - content.a);
 	return vec4(c, 1.0) * mask;
 }

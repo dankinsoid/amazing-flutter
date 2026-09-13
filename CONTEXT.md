@@ -103,6 +103,11 @@ blow-away), genie, god rays behind live text input, caustics.
   `BackdropFilter` rescaling the texture) affected 3.32–3.33 and is **fixed** here.
 - `README.md` was written against 3.47 release notes, so anything it describes as
   new may need a version check before use.
+- **macOS runs Skia by default in 3.38.** `flutter run` passes
+  `enable-impeller=false` unless given `--enable-impeller`; the example sets
+  `FLTEnableImpeller` in `macos/Runner/Info.plist` so the app itself defaults to
+  Impeller. On Skia `ImageFilter.shader` is unsupported and `fwidth()` does not
+  even compile to SkSL — guard the `FragmentProgram` load, not just the filter.
 - Target platforms: iOS and macOS first (Impeller/Metal). Web runs Skia, so the
   backdrop primitive will not work there — plan the fallback, don't plan the demo
   around it.
