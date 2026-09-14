@@ -41,8 +41,8 @@ p = FlutterFragCoord()
 sd = sceneSd(p)                       // 1
 aa = fwidth(sd)                       // before any branch: derivatives need uniform control flow
 sdShadow = sceneSd(p + light.xy · shadowOffset)   // 1, again: only to know which side faces away from the light
-floor = (dark ring outside the edge, bright band inside it), both weighted toward the far side
-sd > aa  ->  fragColor = (0, 0, 0, shadow)        // early-out, 0 reads: premultiplied alpha darkens the sharp original
+floor = (dark ring, bright band) outside the edge; the band leads on the far side, the ring follows
+sd > aa  ->  fragColor = (backdrop·caustic, shadow)   // early-out: alpha darkens; adding the backdrop's own colour multiplies it (1 read, caustic band only)
 mask = coverage(sd, aa)
 water = heightWater(p)                // 2, once: (h, dh/dx, dh/dy, envelope) over 32 sources
 n = normalAt(p, water.yz)             // 3, 4x heightStatic (sceneSd + profile) + analytic water gradient
@@ -108,24 +108,23 @@ Declaration order is the `setFloat` index. Scalars first, arrays last, so changi
 | 18 | `uRimWidth` | float | 1 | edge band for rim light and inner shadow, px |
 | 19 | `uFresnel` | float | 1 | Fresnel strength toward the edge |
 | 20 | `uInnerShadow` | float | 1 | inner edge shadow strength |
-| 21 | `uShadow` | float | 1 | dark ring outside the edge, strongest away from the light |
-| 22 | `uShadowOffset` | float | 1 | ring width, px; also the silhouette shift that defines "away" |
-| 23 | `uCaustic` | float | 1 | multiplicative brightening just inside the far edge |
-| 24 | `uWaveCaustic` | float | 1 | floor brightening under wave crests, per k²·h, sampled at the refracted point |
-| 25 | `uHasContent` | float | 1 | > 0.5: sampler 1 holds the content snapshot |
-| 26 | `uContentRect` | vec4 | 4 | x, y, w, h in px — where sampler 1 sits on screen |
-| 30 | `uContentStrength` | float | 1 | content displacement per px of water envelope |
-| 31 | `uWave` | vec4 | 4 | k (rad/px), ω (rad/s), reach (px), τ (s) — shared by all sources |
-| 35 | `uTouches[32]` | vec4[32] | 128 | per source: x, y, age (s), amplitude (px); amplitude 0 = empty |
-| 163 | `uShapes[24]` | vec4[24] | 96 | 3 slots per shape, see below |
-| — | **total** | | **259** | |
+| 21 | `uShadow` | float | 1 | dark ring outside the edge, pushed outward on the far side |
+| 22 | `uShadowOffset` | float | 1 | band width, px; also the silhouette shift that defines "far" |
+| 23 | `uCaustic` | float | 1 | multiplicative brightening just outside the far edge |
+| 24 | `uHasContent` | float | 1 | > 0.5: sampler 1 holds the content snapshot |
+| 25 | `uContentRect` | vec4 | 4 | x, y, w, h in px — where sampler 1 sits on screen |
+| 29 | `uContentStrength` | float | 1 | content displacement per px of water envelope |
+| 30 | `uWave` | vec4 | 4 | k (rad/px), ω (rad/s), reach (px), τ (s) — shared by all sources |
+| 34 | `uTouches[32]` | vec4[32] | 128 | per source: x, y, age (s), amplitude (px); amplitude 0 = empty |
+| 162 | `uShapes[24]` | vec4[24] | 96 | 3 slots per shape, see below |
+| — | **total** | | **258** | |
 | sampler 0 | `uBackdrop` | sampler2D | | **engine-filled**; already blurred when frost is composed |
 | sampler 1 | `uContent` | sampler2D | | content snapshot, premultiplied, `setImageSampler(1, …)` |
 
 GLES flips sampler 0 vertically; the shader corrects it under the compile-time
 `IMPELLER_TARGET_OPENGLES` macro, so no uniform is spent on it.
 
-Shape `i` occupies floats `163 + 12·i` … `163 + 12·i + 11`:
+Shape `i` occupies floats `162 + 12·i` … `162 + 12·i + 11`:
 
 | Slot | Components | circle | capsule | rounded box | bent capsule |
 |---|---|---|---|---|---|
@@ -195,10 +194,11 @@ The engine blurs the backdrop first; sampler 0 is the blurred image. Content
 - **The early-out must not read the backdrop.** Sampler 0 outside the glass is
   blurred too; reading it back would frost the whole screen. `BackdropFilter`
   composites the filter output over the original with `srcOver`, so the shader emits
-  premultiplied `(0, 0, 0, shadow)`: alpha darkens the sharp original with zero reads.
-  Outside the shadow ring that is `vec4(0)`. Only darkening is expressible this way —
-  which is why the caustic lives inside the mask, where the backdrop is sampled and
-  can be multiplied. This is verification item 4 and the skeleton is
+  premultiplied `(backdrop·caustic, shadow)`: alpha darkens the sharp original, and
+  adding the backdrop's own colour scaled by the caustic multiplies it. The one read
+  happens only in the caustic band; with frost it returns the blurred backdrop, which
+  lands as a soft glow over the sharp original rather than a halo. Beyond both bands
+  the output is `vec4(0)`. This is verification item 4 and the skeleton is
   the test: with `sceneSd` stubbed to `FAR`, frost composed, the screen must stay sharp.
 - **One frost radius per pass.** All surfaces drawn by one `LiquidGlass` share `σ`.
   Different frost per surface means a second `BackdropFilter` (a second pass).
@@ -314,7 +314,7 @@ what; the skeleton as it stands is the test vehicle for 1–5.
 
 | Region | Texture reads | ALU, dominant terms |
 |---|---|---|
-| outside the mask (`sd > aa`) | 0 | 2 × (8 `sdShape` + 7 `smin`) + `fwidth` — the second for the shifted shadow silhouette |
+| outside the mask (`sd > aa`) | 0, or 1 in the caustic band | 2 × (8 `sdShape` + 7 `smin`) + `fwidth` — the second for the shifted shadow silhouette |
 | inside the mask, base | 1 | 5 × (8 `sdShape` + 7 `smin`) + 32 × `waterRing` (sin, cos, 2 exp, rsqrt) + lighting (2 pow) |
 | + aberration | 3 | + 2 uv transforms |
 | + content | +1 | + rect test |

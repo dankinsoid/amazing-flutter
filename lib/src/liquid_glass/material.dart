@@ -50,7 +50,6 @@ final class GlassMaterial {
 		this.shadow = 0.3,
 		this.shadowOffset = 14,
 		this.caustic = 0.35,
-		this.waveCaustic = 4,
 		this.contentStrength = 0.6,
 		this.rippleStrength = 1,
 		this.frostSigma = 0,
@@ -78,14 +77,12 @@ final class GlassMaterial {
 	final double rimWidth;
 	final double fresnel;
 	final double innerShadow;
-	/// Dark ring outside the edge, strongest away from the light.
+	/// Dark ring outside the edge, pushed outward on the far side.
 	final double shadow;
 	/// Width of the shadow ring and caustic band.
 	final double shadowOffset;
-	/// Brightening just inside the far edge, where the rim focuses light.
+	/// Brightening just outside the far edge, where the rim focuses light.
 	final double caustic;
-	/// Floor brightening under wave crests, per unit of k²·h.
-	final double waveCaustic;
 	/// Content displacement per pixel of water envelope.
 	final double contentStrength;
 	/// Multiplies every touch amplitude; 0 turns the water off.
@@ -112,7 +109,6 @@ final class GlassMaterial {
 		double? shadow,
 		double? shadowOffset,
 		double? caustic,
-		double? waveCaustic,
 		double? contentStrength,
 		double? rippleStrength,
 		double? frostSigma,
@@ -135,7 +131,6 @@ final class GlassMaterial {
 		shadow: shadow ?? this.shadow,
 		shadowOffset: shadowOffset ?? this.shadowOffset,
 		caustic: caustic ?? this.caustic,
-		waveCaustic: waveCaustic ?? this.waveCaustic,
 		contentStrength: contentStrength ?? this.contentStrength,
 		rippleStrength: rippleStrength ?? this.rippleStrength,
 		frostSigma: frostSigma ?? this.frostSigma,

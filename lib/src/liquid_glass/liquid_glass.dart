@@ -17,12 +17,12 @@ abstract final class _U {
 	static const smoothK = 5, edgeWidth = 6, glassHeight = 7;
 	static const thickness = 8, aberration = 9, tint = 10, saturation = 14;
 	static const specular = 15, shininess = 16, rim = 17, rimWidth = 18, fresnel = 19, innerShadow = 20;
-	static const shadow = 21, shadowOffset = 22, caustic = 23, waveCaustic = 24;
-	static const hasContent = 25, contentStrength = 30;
-	static const wave = 31;
-	static const touches = 35, touchStride = 4, maxTouches = 32;
-	static const shapes = 163, maxShapes = 8;
-	static const total = 259;
+	static const shadow = 21, shadowOffset = 22, caustic = 23;
+	static const hasContent = 24, contentStrength = 29;
+	static const wave = 30;
+	static const touches = 34, touchStride = 4, maxTouches = 32;
+	static const shapes = 162, maxShapes = 8;
+	static const total = 258;
 }
 
 /// One merged glass surface over [child]; positions are logical px from its top-left.
@@ -138,7 +138,6 @@ class _LiquidGlassState extends State<LiquidGlass> with SingleTickerProviderStat
 		f[_U.shadow] = m.shadow;
 		f[_U.shadowOffset] = m.shadowOffset * dpr;
 		f[_U.caustic] = m.caustic;
-		f[_U.waveCaustic] = m.waveCaustic;
 
 		f[_U.hasContent] = 0;
 		f[_U.contentStrength] = m.contentStrength;

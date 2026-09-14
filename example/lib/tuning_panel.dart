@@ -35,7 +35,6 @@ const _knobs = <(String, List<_Knob>)>[
 		_Knob('shadow', 0, 1, _sd, _ssd),
 		_Knob('shadowOffset', 0, 60, _so, _sso),
 		_Knob('caustic', 0, 2, _ca, _sca),
-		_Knob('waveCaustic', 0, 20, _wc, _swc),
 	]),
 	('Color', [
 		_Knob('tintStrength', 0, 1, _ts, _sts),
@@ -79,8 +78,6 @@ double _so(GlassMaterial m) => m.shadowOffset;
 GlassMaterial _sso(GlassMaterial m, double v) => m.copyWith(shadowOffset: v);
 double _ca(GlassMaterial m) => m.caustic;
 GlassMaterial _sca(GlassMaterial m, double v) => m.copyWith(caustic: v);
-double _wc(GlassMaterial m) => m.waveCaustic;
-GlassMaterial _swc(GlassMaterial m, double v) => m.copyWith(waveCaustic: v);
 double _ts(GlassMaterial m) => m.tintStrength;
 GlassMaterial _sts(GlassMaterial m, double v) => m.copyWith(tintStrength: v);
 double _sa(GlassMaterial m) => m.saturation;
