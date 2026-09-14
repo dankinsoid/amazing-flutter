@@ -40,9 +40,9 @@ Data flow in `main()`:
 p = FlutterFragCoord()
 sd = sceneSd(p)                       // 1
 aa = fwidth(sd)                       // before any branch: derivatives need uniform control flow
-sdShadow = sceneSd(p + light.xy · shadowOffset)   // 1, again: silhouette shifted away from the light
-floor = (shadow inside sdShadow, caustic crescent where sdShadow < 0 < sd)
-sd > aa  ->  fragColor = (caustic, shadow)        // early-out, 0 reads: premultiplied add + darken over the sharp original
+sdShadow = sceneSd(p + light.xy · shadowOffset)   // 1, again: only to know which side faces away from the light
+floor = (dark ring outside the edge, bright band inside it), both weighted toward the far side
+sd > aa  ->  fragColor = (0, 0, 0, shadow)        // early-out, 0 reads: premultiplied alpha darkens the sharp original
 mask = coverage(sd, aa)
 water = heightWater(p)                // 2, once: (h, dh/dx, dh/dy, envelope) over 32 sources
 n = normalAt(p, water.yz)             // 3, 4x heightStatic (sceneSd + profile) + analytic water gradient
@@ -108,10 +108,10 @@ Declaration order is the `setFloat` index. Scalars first, arrays last, so changi
 | 18 | `uRimWidth` | float | 1 | edge band for rim light and inner shadow, px |
 | 19 | `uFresnel` | float | 1 | Fresnel strength toward the edge |
 | 20 | `uInnerShadow` | float | 1 | inner edge shadow strength |
-| 21 | `uShadow` | float | 1 | floor darkening inside the silhouette shifted away from the light |
-| 22 | `uShadowOffset` | float | 1 | silhouette shift, px; also the shadow's softness |
-| 23 | `uCaustic` | float | 1 | focused-light crescent on the far side of the shadow |
-| 24 | `uWaveCaustic` | float | 1 | floor brightening under wave crests, per k²·h |
+| 21 | `uShadow` | float | 1 | dark ring outside the edge, strongest away from the light |
+| 22 | `uShadowOffset` | float | 1 | ring width, px; also the silhouette shift that defines "away" |
+| 23 | `uCaustic` | float | 1 | multiplicative brightening just inside the far edge |
+| 24 | `uWaveCaustic` | float | 1 | floor brightening under wave crests, per k²·h, sampled at the refracted point |
 | 25 | `uHasContent` | float | 1 | > 0.5: sampler 1 holds the content snapshot |
 | 26 | `uContentRect` | vec4 | 4 | x, y, w, h in px — where sampler 1 sits on screen |
 | 30 | `uContentStrength` | float | 1 | content displacement per px of water envelope |
@@ -195,9 +195,10 @@ The engine blurs the backdrop first; sampler 0 is the blurred image. Content
 - **The early-out must not read the backdrop.** Sampler 0 outside the glass is
   blurred too; reading it back would frost the whole screen. `BackdropFilter`
   composites the filter output over the original with `srcOver`, so the shader emits
-  premultiplied `(caustic, caustic, caustic, shadow)`: rgb adds the focused light and
-  alpha darkens — the sharp original shows through, modulated, with zero reads. Fully
-  outside the shadow that is `vec4(0)`. This is verification item 4 and the skeleton is
+  premultiplied `(0, 0, 0, shadow)`: alpha darkens the sharp original with zero reads.
+  Outside the shadow ring that is `vec4(0)`. Only darkening is expressible this way —
+  which is why the caustic lives inside the mask, where the backdrop is sampled and
+  can be multiplied. This is verification item 4 and the skeleton is
   the test: with `sceneSd` stubbed to `FAR`, frost composed, the screen must stay sharp.
 - **One frost radius per pass.** All surfaces drawn by one `LiquidGlass` share `σ`.
   Different frost per surface means a second `BackdropFilter` (a second pass).

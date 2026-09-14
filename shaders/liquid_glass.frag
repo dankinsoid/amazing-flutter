@@ -56,10 +56,10 @@ uniform float uFresnel;      // [19]
 uniform float uInnerShadow;  // [20]
 
 // [21] floor: what the glass does to the surface under and around it
-uniform float uShadow;        // [21] darkening inside the silhouette shifted away from the light
-uniform float uShadowOffset;  // [22] silhouette shift, px; also sets the shadow's softness
-uniform float uCaustic;       // [23] focused-light crescent on the far side of the shadow
-uniform float uWaveCaustic;   // [24] floor brightening under wave crests
+uniform float uShadow;        // [21] dark ring outside the edge, strongest away from the light
+uniform float uShadowOffset;  // [22] ring width, px; also how far the silhouette shifts to find "away"
+uniform float uCaustic;       // [23] brightening just inside the far edge, where the rim focuses light
+uniform float uWaveCaustic;   // [24] floor brightening under wave crests, seen through the refraction
 
 // [25] content
 uniform float uHasContent;       // [25] > 0.5: sampler 1 holds the content snapshot
@@ -306,19 +306,21 @@ vec3 adjustColor(vec3 c) {
 	return mix(c, uTint.rgb, uTint.a);
 }
 
-// Shadow and focused light on the surface beneath: (darken, brighten).
-// The crescent is the part of the shifted silhouette not covered by the glass —
-// automatically the side away from the light.
+// What the rim does to the surface beneath: (dark ring outside, bright band inside).
+// Only the sloped rim bends light — inward — so the middle casts nothing. "Away
+// from the light" comes from the silhouette shifted along the light: at the far
+// edge the shifted sd is about -offset, at the near edge +offset.
 vec2 floorLight(float sd, float sdShadow) {
-	float soft = max(0.5 * uShadowOffset, 2.0);
-	float inShadow = 1.0 - smoothstep(-soft, soft, sdShadow);
-	float crescent = inShadow * smoothstep(0.0, soft, sd) * (1.0 - smoothstep(0.0, 2.0 * soft, -sdShadow));
-	return vec2(uShadow * inShadow, uCaustic * crescent);
+	float w = max(uShadowOffset, 2.0);
+	float farness = clamp(0.5 + 0.5 * (sd - sdShadow) / w, 0.0, 1.0);
+	float ringOut = 1.0 - smoothstep(0.0, w, sd);
+	float bandIn = 1.0 - smoothstep(0.0, w, -sd);
+	return vec2(uShadow * ringOut * farness, uCaustic * bandIn * farness);
 }
 
-vec4 composite(vec4 backdrop, vec4 content, Light lt, float sd, float mask, vec2 floorL, float waterH) {
-	vec3 floorC = backdrop.rgb * (1.0 - floorL.x) + floorL.y;
-	floorC *= 1.0 + uWaveCaustic * uWave.x * uWave.x * waterH;
+vec4 composite(vec4 backdrop, vec4 content, Light lt, float sd, float mask, float caustic, float floorWave) {
+	// Focused light multiplies: a lit surface gets brighter and more saturated, not whiter.
+	vec3 floorC = backdrop.rgb * (1.0 + caustic) * (1.0 + uWaveCaustic * uWave.x * uWave.x * floorWave);
 	vec3 glass = adjustColor(floorC);
 	float band = 1.0 - smoothstep(0.0, uRimWidth, -sd);
 	glass *= 1.0 - uInnerShadow * band;
@@ -335,13 +337,13 @@ void main() {
 	vec2 lxy = uLight.xy;
 	float ll = length(lxy);
 	vec2 shift = ll > 1e-4 ? lxy / ll * uShadowOffset : vec2(0.0);
-	float sdShadow = (uShadow > 0.0 || uCaustic > 0.0) ? sceneSd(p + shift) : FAR;
+	float sdShadow = (uShadow > 0.0 || uCaustic > 0.0) ? sceneSd(p + shift) : sd;
 	vec2 floorL = floorLight(sd, sdShadow);
+	// Outside the glass only the dark ring remains: premultiplied (0, alpha) darkens
+	// the sharp original through srcOver, so no backdrop read (sampler 0 may be blurred).
+	vec4 floorOnly = vec4(0.0, 0.0, 0.0, floorL.x);
 	if (sd > aa) {
-		// Outside the glass: no backdrop read (with frost composed, sampler 0 is
-		// blurred). Premultiplied (add, alpha) darkens and brightens the sharp
-		// original through srcOver.
-		fragColor = vec4(vec3(floorL.y), floorL.x);
+		fragColor = floorOnly;
 		return;
 	}
 	float mask = coverage(sd, aa);
@@ -351,8 +353,9 @@ void main() {
 	vec4 backdrop = sampleBackdrop(p, n);
 	vec4 content = sampleContent(p, n, waveEnv);
 	Light lt = lighting(n, sd);
-	vec4 glass = composite(backdrop, content, lt, sd, mask, floorL, water.x);
-	// The anti-aliased edge blends against the floor, not the untouched original.
-	vec4 floorOnly = vec4(vec3(floorL.y), floorL.x);
+	// The floor is seen where the refracted ray lands, so its caustic is sampled there —
+	// otherwise the pattern sits on the wave and reads as surface contrast.
+	float floorWave = uWaveCaustic > 0.0 ? heightWater(p + n.xy * uThickness).x : 0.0;
+	vec4 glass = composite(backdrop, content, lt, sd, mask, floorL.y, floorWave);
 	fragColor = glass + floorOnly * (1.0 - mask);
 }

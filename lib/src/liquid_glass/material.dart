@@ -78,11 +78,11 @@ final class GlassMaterial {
 	final double rimWidth;
 	final double fresnel;
 	final double innerShadow;
-	/// Darkening of the surface inside the silhouette shifted away from the light.
+	/// Dark ring outside the edge, strongest away from the light.
 	final double shadow;
-	/// How far the silhouette shifts; also the shadow's softness.
+	/// Width of the shadow ring and caustic band.
 	final double shadowOffset;
-	/// Focused-light crescent on the far side of the shadow.
+	/// Brightening just inside the far edge, where the rim focuses light.
 	final double caustic;
 	/// Floor brightening under wave crests, per unit of k²·h.
 	final double waveCaustic;
