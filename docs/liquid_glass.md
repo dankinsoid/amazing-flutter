@@ -234,7 +234,7 @@ obvious; hence the script is kept.
 ## 8. Dart binding (sketch)
 
 The binding passes parameters; it holds no effect maths. The one known exception is
-noted in §11.
+noted in §12.
 
 ```dart
 sealed class GlassShape {}
@@ -392,4 +392,4 @@ Found while doing this. None reopens a settled decision.
 - **Metaball union**: swap `smin` in `sceneSd`, nothing else moves.
 - **Fluted glass**: fill `heightRelief`; mip-level selection against rib width to
   avoid moiré belongs in stage 4 at that point.
-- **Analytic gradient**: §9.
+- **Analytic gradient**: §10.
