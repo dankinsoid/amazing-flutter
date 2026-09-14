@@ -40,9 +40,10 @@ Data flow in `main()`:
 p = FlutterFragCoord()
 sd = sceneSd(p)                       // 1
 aa = fwidth(sd)                       // before any branch: derivatives need uniform control flow
-sdShadow = sceneSd(p + light.xy · shadowOffset)   // 1, again: only to know which side faces away from the light
-floor = (dark ring, bright band) outside the edge; the band leads on the far side, the ring follows
-sd > aa  ->  fragColor = (backdrop·caustic, shadow)   // early-out: alpha darkens; adding the backdrop's own colour multiplies it (1 read, caustic band only)
+sdSpot = sceneSd(p + light.xy · offset) + 0.35·offset   // 1, again: the lens's light spot — footprint shrunk and shifted away from the light
+shadow  = footprint − spot (near-side crescent, inside the glass)
+caustic = spot − footprint (far-side crescent, outside the glass)
+sd > aa  ->  fragColor = (backdrop·caustic, 0)    // early-out: adding the backdrop's own colour multiplies it (1 read, crescent only)
 mask = coverage(sd, aa)
 water = heightWater(p)                // 2, once: (h, dh/dx, dh/dy, envelope) over 32 sources
 n = normalAt(p, water.yz)             // 3, 4x heightStatic (sceneSd + profile) + analytic water gradient
@@ -108,9 +109,9 @@ Declaration order is the `setFloat` index. Scalars first, arrays last, so changi
 | 18 | `uRimWidth` | float | 1 | edge band for rim light and inner shadow, px |
 | 19 | `uFresnel` | float | 1 | Fresnel strength toward the edge |
 | 20 | `uInnerShadow` | float | 1 | inner edge shadow strength |
-| 21 | `uShadow` | float | 1 | dark ring outside the edge, pushed outward on the far side |
-| 22 | `uShadowOffset` | float | 1 | band width, px; also the silhouette shift that defines "far" |
-| 23 | `uCaustic` | float | 1 | multiplicative brightening just outside the far edge |
+| 21 | `uShadow` | float | 1 | dark crescent on the light-facing side, inside the footprint |
+| 22 | `uShadowOffset` | float | 1 | how far the lens shifts its light spot away from the light, px |
+| 23 | `uCaustic` | float | 1 | bright crescent past the far edge, where the spot leaves the footprint |
 | 24 | `uHasContent` | float | 1 | > 0.5: sampler 1 holds the content snapshot |
 | 25 | `uContentRect` | vec4 | 4 | x, y, w, h in px — where sampler 1 sits on screen |
 | 29 | `uContentStrength` | float | 1 | content displacement per px of water envelope |
@@ -194,11 +195,11 @@ The engine blurs the backdrop first; sampler 0 is the blurred image. Content
 - **The early-out must not read the backdrop.** Sampler 0 outside the glass is
   blurred too; reading it back would frost the whole screen. `BackdropFilter`
   composites the filter output over the original with `srcOver`, so the shader emits
-  premultiplied `(backdrop·caustic, shadow)`: alpha darkens the sharp original, and
-  adding the backdrop's own colour scaled by the caustic multiplies it. The one read
-  happens only in the caustic band; with frost it returns the blurred backdrop, which
-  lands as a soft glow over the sharp original rather than a halo. Beyond both bands
-  the output is `vec4(0)`. This is verification item 4 and the skeleton is
+  premultiplied `(backdrop·caustic, 0)`: adding the backdrop's own colour scaled by the
+  caustic multiplies it. The one read happens only in the far-side crescent; with frost
+  it returns the blurred backdrop, which lands as a soft glow over the sharp original
+  rather than a halo. Elsewhere outside the glass the output is `vec4(0)`. The shadow
+  crescent lies inside the footprint, so it darkens the sampled backdrop in `composite`. This is verification item 4 and the skeleton is
   the test: with `sceneSd` stubbed to `FAR`, frost composed, the screen must stay sharp.
 - **One frost radius per pass.** All surfaces drawn by one `LiquidGlass` share `σ`.
   Different frost per surface means a second `BackdropFilter` (a second pass).
@@ -314,7 +315,7 @@ what; the skeleton as it stands is the test vehicle for 1–5.
 
 | Region | Texture reads | ALU, dominant terms |
 |---|---|---|
-| outside the mask (`sd > aa`) | 0, or 1 in the caustic band | 2 × (8 `sdShape` + 7 `smin`) + `fwidth` — the second for the shifted shadow silhouette |
+| outside the mask (`sd > aa`) | 0, or 1 in the caustic crescent | 2 × (8 `sdShape` + 7 `smin`) + `fwidth` — the second for the shifted shadow silhouette |
 | inside the mask, base | 1 | 5 × (8 `sdShape` + 7 `smin`) + 32 × `waterRing` (sin, cos, 2 exp, rsqrt) + lighting (2 pow) |
 | + aberration | 3 | + 2 uv transforms |
 | + content | +1 | + rect test |

@@ -56,9 +56,9 @@ uniform float uFresnel;      // [19]
 uniform float uInnerShadow;  // [20]
 
 // [21] floor: what the glass does to the surface under and around it
-uniform float uShadow;        // [21] dark ring outside the edge, pushed outward on the far side
-uniform float uShadowOffset;  // [22] band width, px; also how far the silhouette shifts to find "away"
-uniform float uCaustic;       // [23] brightening just outside the far edge, where the rim focuses light
+uniform float uShadow;        // [21] dark crescent on the light-facing side, inside the footprint
+uniform float uShadowOffset;  // [22] how far the lens shifts its light spot away from the light, px
+uniform float uCaustic;       // [23] bright crescent past the far edge, where the spot leaves the footprint
 
 // [24] content
 uniform float uHasContent;       // [24] > 0.5: sampler 1 holds the content snapshot
@@ -305,30 +305,30 @@ vec3 adjustColor(vec3 c) {
 	return mix(c, uTint.rgb, uTint.a);
 }
 
-// What the rim does to the surface beneath: (dark ring, bright band), both outside
-// the edge. The rim focuses light past the far edge, so there the bright band sits
-// first and the ring beyond it; on the near side the ring hugs the edge. "Far" comes
-// from the silhouette shifted along the light: sd - sdShadow is +offset there.
-vec2 floorLight(float sd, float sdShadow) {
-	float w = max(uShadowOffset, 2.0);
-	float farness = clamp(0.5 + 0.5 * (sd - sdShadow) / w, 0.0, 1.0);
-	float caustic = uCaustic * farness * (1.0 - smoothstep(0.0, w, sd));
-	float inner = w * farness;
-	float ring = smoothstep(inner - 0.5 * w, inner, sd) * (1.0 - smoothstep(inner, inner + w, sd));
-	return vec2(uShadow * ring, caustic);
+// A drop is a converging lens: under side light its light spot is the footprint
+// shrunk a little and shifted away from the light. Footprint minus spot is the dark
+// crescent on the near side; spot minus footprint is the bright crescent past the
+// far edge. Returns (shadow inside, caustic outside).
+const float SPOT_SHRINK = 0.35;
+
+vec2 floorLight(float sd, float sdSpot, float aa) {
+	float soft = max(0.25 * uShadowOffset, 2.0);
+	float inShape = 1.0 - smoothstep(-aa, aa, sd);
+	float outShape = 1.0 - inShape;
+	float inSpot = 1.0 - smoothstep(-soft, soft, sdSpot);
+	float outSpot = 1.0 - inSpot;
+	return vec2(uShadow * inShape * outSpot, uCaustic * outShape * inSpot);
 }
 
-// Outside the glass. Premultiplied over srcOver: alpha darkens the sharp original,
-// and adding the backdrop's own colour scaled by the caustic multiplies it — one read,
-// only where the caustic is non-zero, and a soft glow rather than a halo when frost
-// has blurred sampler 0.
-vec4 floorOnly(vec2 p, vec2 fl) {
-	vec3 add = fl.y > 1e-3 ? texture(uBackdrop, backdropUv(p)).rgb * fl.y : vec3(0.0);
-	return vec4(add, fl.x);
+// Outside the glass, premultiplied over srcOver: adding the backdrop's own colour
+// scaled by the caustic multiplies it. One read, only where the crescent is.
+vec4 floorOnly(vec2 p, float caustic) {
+	vec3 add = caustic > 1e-3 ? texture(uBackdrop, backdropUv(p)).rgb * caustic : vec3(0.0);
+	return vec4(add, 0.0);
 }
 
-vec4 composite(vec4 backdrop, vec4 content, Light lt, float sd, float mask) {
-	vec3 glass = adjustColor(backdrop.rgb);
+vec4 composite(vec4 backdrop, vec4 content, Light lt, float sd, float mask, float shadow) {
+	vec3 glass = adjustColor(backdrop.rgb * (1.0 - shadow));
 	float band = 1.0 - smoothstep(0.0, uRimWidth, -sd);
 	glass *= 1.0 - uInnerShadow * band;
 	glass += vec3(lt.fresnel + lt.specular + lt.rim);
@@ -344,8 +344,11 @@ void main() {
 	vec2 lxy = uLight.xy;
 	float ll = length(lxy);
 	vec2 shift = ll > 1e-4 ? lxy / ll * uShadowOffset : vec2(0.0);
-	float sdShadow = (uShadow > 0.0 || uCaustic > 0.0) ? sceneSd(p + shift) : sd;
-	vec4 floorC = floorOnly(p, floorLight(sd, sdShadow));
+	float sdSpot = (uShadow > 0.0 || uCaustic > 0.0)
+		? sceneSd(p + shift) + SPOT_SHRINK * uShadowOffset
+		: sd;
+	vec2 fl = floorLight(sd, sdSpot, aa);
+	vec4 floorC = floorOnly(p, fl.y);
 	if (sd > aa) {
 		fragColor = floorC;
 		return;
@@ -357,6 +360,6 @@ void main() {
 	vec4 backdrop = sampleBackdrop(p, n);
 	vec4 content = sampleContent(p, n, waveEnv);
 	Light lt = lighting(n, sd);
-	vec4 glass = composite(backdrop, content, lt, sd, mask);
+	vec4 glass = composite(backdrop, content, lt, sd, mask, fl.x);
 	fragColor = glass + floorC * (1.0 - mask);
 }

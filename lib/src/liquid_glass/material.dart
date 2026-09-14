@@ -47,9 +47,9 @@ final class GlassMaterial {
 		this.rimWidth = 6,
 		this.fresnel = 0.25,
 		this.innerShadow = 0.15,
-		this.shadow = 0.3,
-		this.shadowOffset = 14,
-		this.caustic = 0.35,
+		this.shadow = 0.35,
+		this.shadowOffset = 12,
+		this.caustic = 0.5,
 		this.contentStrength = 0.6,
 		this.rippleStrength = 1,
 		this.frostSigma = 0,
@@ -77,11 +77,11 @@ final class GlassMaterial {
 	final double rimWidth;
 	final double fresnel;
 	final double innerShadow;
-	/// Dark ring outside the edge, pushed outward on the far side.
+	/// Dark crescent on the light-facing side, inside the footprint.
 	final double shadow;
-	/// Width of the shadow ring and caustic band.
+	/// How far the lens shifts its light spot away from the light.
 	final double shadowOffset;
-	/// Brightening just outside the far edge, where the rim focuses light.
+	/// Bright crescent past the far edge, where the spot leaves the footprint.
 	final double caustic;
 	/// Content displacement per pixel of water envelope.
 	final double contentStrength;
