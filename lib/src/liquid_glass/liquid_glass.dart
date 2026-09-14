@@ -49,6 +49,14 @@ class LiquidGlass extends StatefulWidget {
 
 class _LiquidGlassState extends State<LiquidGlass> with SingleTickerProviderStateMixin {
 	static Future<ui.FragmentProgram>? _program;
+	// ImageFilter.shader requires every sampler but the first to be bound.
+	static final ui.Image _blank = _makeBlank();
+
+	static ui.Image _makeBlank() {
+		final recorder = ui.PictureRecorder();
+		ui.Canvas(recorder);
+		return recorder.endRecording().toImageSync(1, 1);
+	}
 
 	ui.FragmentShader? _shader;
 	late final Ticker _ticker;
@@ -63,7 +71,7 @@ class _LiquidGlassState extends State<LiquidGlass> with SingleTickerProviderStat
 			_program ??= ui.FragmentProgram.fromAsset('packages/amazing_flutter/shaders/liquid_glass.frag');
 			_program!.then((program) {
 				if (!mounted) return;
-				setState(() => _shader = program.fragmentShader());
+				setState(() => _shader = program.fragmentShader()..setImageSampler(1, _blank));
 			});
 		}
 		_syncTicker();

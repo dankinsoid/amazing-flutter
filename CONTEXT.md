@@ -96,17 +96,18 @@ blow-away), genie, god rays behind live text input, caustics.
 
 ## Environment
 
-- Local toolchain at time of writing: **Flutter 3.38.9 stable**, Dart 3.11.5, macOS arm64.
+- Local toolchain: **Flutter 3.47.4 stable**, Dart 3.13.3, macOS arm64 (upgraded from 3.38.9 on 2026-09-14 for #170820).
 - `ImageFilter.shader` and `isShaderFilterSupported` are present in this SDK
   (verified in `sky_engine/lib/ui/painting.dart`) — no upgrade needed to start.
 - [#170820](https://github.com/flutter/flutter/issues/170820) (blur + shader in one
-  `BackdropFilter`): the runtime shader runs at the blur's downsampled resolution,
-  so `FlutterFragCoord`/`uSize` shrink, shapes in full-res px land off-texture and
-  the output is blocky. **Reproduced on 3.38.9.** The fix (#177687) merged to
-  master 2025-10-30, after the 3.38 branch cut — needs a newer stable, or frost
-  must be done inside the shader.
-- `README.md` was written against 3.47 release notes, so anything it describes as
-  new may need a version check before use.
+  `BackdropFilter`): on 3.38 the runtime shader ran at the blur's downsampled
+  resolution, so shapes in full-res px landed off-texture and the output was
+  blocky. Fixed by #177687 (master 2025-10-30); **verified working on 3.47.4**.
+- `ImageFilter.shader` requires **every sampler except the first to be bound**
+  (engine `ValidateImageFilter`). 3.38 built the error message and never threw it;
+  3.47 throws. Bind a 1×1 blank image to unused samplers.
+- `macos/Runner/Info.plist` has `FLTEnableImpeller`; `flutter run` still needs
+  `--enable-impeller` on 3.47 for the desktop target.
 - **macOS runs Skia by default in 3.38.** `flutter run` passes
   `enable-impeller=false` unless given `--enable-impeller`; the example sets
   `FLTEnableImpeller` in `macos/Runner/Info.plist` so the app itself defaults to
