@@ -17,7 +17,7 @@ abstract final class _U {
 	static const smoothK = 5, edgeWidth = 6, glassHeight = 7;
 	static const thickness = 8, aberration = 9, tint = 10, saturation = 14;
 	static const specular = 15, shininess = 16, rim = 17, rimWidth = 18, fresnel = 19, innerShadow = 20;
-	static const shadow = 21, shadowOffset = 22, caustic = 23;
+	static const shadow = 21, floorScale = 22, caustic = 23;
 	static const hasContent = 24, contentStrength = 29;
 	static const wave = 30;
 	static const touches = 34, touchStride = 4, maxTouches = 32;
@@ -136,7 +136,7 @@ class _LiquidGlassState extends State<LiquidGlass> with SingleTickerProviderStat
 		f[_U.fresnel] = m.fresnel;
 		f[_U.innerShadow] = m.innerShadow;
 		f[_U.shadow] = m.shadow;
-		f[_U.shadowOffset] = m.shadowOffset * dpr;
+		f[_U.floorScale] = m.floorScale;
 		f[_U.caustic] = m.caustic;
 
 		f[_U.hasContent] = 0;

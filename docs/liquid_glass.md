@@ -40,10 +40,11 @@ Data flow in `main()`:
 p = FlutterFragCoord()
 sd = sceneSd(p)                       // 1
 aa = fwidth(sd)                       // before any branch: derivatives need uniform control flow
-sdSpot = sceneSd(p + light.xy · offset) + 0.35·offset   // 1, again: the lens's light spot — footprint shrunk and shifted away from the light
-shadow  = footprint − spot (near-side crescent, inside the glass)
-caustic = spot − footprint (far-side crescent, outside the glass)
-sd > aa  ->  fragColor = (backdrop·caustic, 0)    // early-out: adding the backdrop's own colour multiplies it (1 read, crescent only)
+L = height / tan(elevation) · floorScale          // the rim's cast-shadow length; every floor feature is this wide
+sdShifted = sceneSd(p + l̂ · L)                    // 1, again: footprint moved away from the light
+floor = shifted − footprint (cast shadow, outside far), footprint − shifted (dark seam, inside near),
+        bright band just inside the seam (see §7)
+sd > aa  ->  fragColor = (0, 0, 0, castShadow)    // early-out, 0 reads: premultiplied alpha darkens the sharp original
 mask = coverage(sd, aa)
 water = heightWater(p)                // 2, once: (h, dh/dx, dh/dy, envelope) over 32 sources
 n = normalAt(p, water.yz)             // 3, 4x heightStatic (sceneSd + profile) + analytic water gradient
@@ -109,9 +110,9 @@ Declaration order is the `setFloat` index. Scalars first, arrays last, so changi
 | 18 | `uRimWidth` | float | 1 | edge band for rim light and inner shadow, px |
 | 19 | `uFresnel` | float | 1 | Fresnel strength toward the edge |
 | 20 | `uInnerShadow` | float | 1 | inner edge shadow strength |
-| 21 | `uShadow` | float | 1 | dark crescent on the light-facing side, inside the footprint |
-| 22 | `uShadowOffset` | float | 1 | how far the lens shifts its light spot away from the light, px |
-| 23 | `uCaustic` | float | 1 | bright crescent past the far edge, where the spot leaves the footprint |
+| 21 | `uShadow` | float | 1 | cast shadow past the far edge and the dark seam inside the near edge |
+| 22 | `uFloorScale` | float | 1 | multiplies the physical shadow length `height / tan(elevation)`; 1 = as traced |
+| 23 | `uCaustic` | float | 1 | bright focus band inside the near edge, right after the dark seam |
 | 24 | `uHasContent` | float | 1 | > 0.5: sampler 1 holds the content snapshot |
 | 25 | `uContentRect` | vec4 | 4 | x, y, w, h in px — where sampler 1 sits on screen |
 | 29 | `uContentStrength` | float | 1 | content displacement per px of water envelope |
@@ -195,18 +196,42 @@ The engine blurs the backdrop first; sampler 0 is the blurred image. Content
 - **The early-out must not read the backdrop.** Sampler 0 outside the glass is
   blurred too; reading it back would frost the whole screen. `BackdropFilter`
   composites the filter output over the original with `srcOver`, so the shader emits
-  premultiplied `(backdrop·caustic, 0)`: adding the backdrop's own colour scaled by the
-  caustic multiplies it. The one read happens only in the far-side crescent; with frost
-  it returns the blurred backdrop, which lands as a soft glow over the sharp original
-  rather than a halo. Elsewhere outside the glass the output is `vec4(0)`. The shadow
-  crescent lies inside the footprint, so it darkens the sampled backdrop in `composite`. This is verification item 4 and the skeleton is
+  premultiplied `(0, 0, 0, castShadow)`: alpha darkens the sharp original with zero
+  reads. Beyond the cast shadow that is `vec4(0)`. The bright band and the dark seam
+  lie inside the footprint, where the sampled backdrop can be multiplied. This is verification item 4 and the skeleton is
   the test: with `sceneSd` stubbed to `FAR`, frost composed, the screen must stay sharp.
 - **One frost radius per pass.** All surfaces drawn by one `LiquidGlass` share `σ`.
   Different frost per surface means a second `BackdropFilter` (a second pass).
 - **The blur costs the whole filter area**, not the glass area. Whether a `ClipRect`
   around the `BackdropFilter` shrinks that area on Impeller is verification item 10.
 
-## 7. Dart binding (sketch)
+## 7. Floor lighting, from ray-tracing
+
+`tools/floor_trace.py` traces parallel light through the profile (Snell, Fresnel,
+exit through the far slope) and histograms where it lands on the floor. Relative
+irradiance along the light azimuth, near edge at −70, far edge at +70:
+
+```
+height 10, elevation 46°:  … 1.00 │ 0.61 1.17 1.49 1.22 1.10 1.02 … 0.97 … 1.04 1.14 │ 0.00 0.90 1.00 …
+height 25, elevation 46°:  … 1.00 │ 0.61 0.61 0.66 0.73 0.98 1.93 2.57 1.54 … 0.97 … 1.26 │ 0.00 0.00 0.00 0.00 1.00 …
+```
+
+The same shape at every height and angle, scaled by one length **L = height /
+tan(elevation)** — the rim's cast shadow:
+
+- **past the far edge**: shadow of width ≈ L (rays that would land there hit the far
+  slope and are bent inward);
+- **inside the near edge**: a dark seam of width ≈ L, then the bright focus band
+  (1.5–4×) where that light lands;
+- the flat middle passes light straight (0.97, Fresnel loss); the far rim's inside is
+  only faintly brighter.
+
+This is the thin-lens case our profile actually is. A hemispherical drop focuses on
+the far side instead — not our geometry. Earlier guesses (shadow ring all around,
+bright crescent past the far edge, lens spot) were all wrong in ways the trace made
+obvious; hence the script is kept.
+
+## 8. Dart binding (sketch)
 
 The binding passes parameters; it holds no effect maths. The one known exception is
 noted in §11.
@@ -275,7 +300,7 @@ union of the shapes (no `smin`, no merging) around `BackdropFilter(blur(frostSig
 with a translucent `tint` fill; `content` is painted as an ordinary child at
 `contentRect`. Touches are ignored.
 
-## 8. Foundation verification
+## 9. Foundation verification
 
 Confirm in the example app before building on any of it. Ordered by what blocks
 what; the skeleton as it stands is the test vehicle for 1–5.
@@ -311,11 +336,11 @@ what; the skeleton as it stands is the test vehicle for 1–5.
 10. **`ClipRect` around the `BackdropFilter`** shrinks the blurred area on Impeller, or
     the whole screen is processed regardless (`CONTEXT.md` says the latter).
 
-## 9. Cost per pixel
+## 10. Cost per pixel
 
 | Region | Texture reads | ALU, dominant terms |
 |---|---|---|
-| outside the mask (`sd > aa`) | 0, or 1 in the caustic crescent | 2 × (8 `sdShape` + 7 `smin`) + `fwidth` — the second for the shifted shadow silhouette |
+| outside the mask (`sd > aa`) | 0 | 2 × (8 `sdShape` + 7 `smin`) + `fwidth` — the second for the shifted shadow silhouette |
 | inside the mask, base | 1 | 5 × (8 `sdShape` + 7 `smin`) + 32 × `waterRing` (sin, cos, 2 exp, rsqrt) + lighting (2 pow) |
 | + aberration | 3 | + 2 uv transforms |
 | + content | +1 | + rect test |
@@ -329,7 +354,7 @@ normal of the glass profile; the water gradient is already analytic. Returning
 profiling shows the raster thread ALU-bound. Empty shape and touch slots cost one uniform
 compare each.
 
-## 10. Open questions
+## 11. Open questions
 
 Found while doing this. None reopens a settled decision.
 
@@ -357,7 +382,7 @@ Found while doing this. None reopens a settled decision.
    levels; at rest the read lands on texel centres so linear = exact. Verify
    `setImageSampler` defaults.
 
-## 11. Deferred, with the reason
+## 12. Deferred, with the reason
 
 - **Bent capsule content positioning.** Content in v1 is rectangular. Laying content
   along a bent capsule needs the same polyline-with-rounded-corner geometry on the Dart

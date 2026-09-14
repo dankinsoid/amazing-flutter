@@ -33,7 +33,7 @@ const _knobs = <(String, List<_Knob>)>[
 	]),
 	('Floor', [
 		_Knob('shadow', 0, 1, _sd, _ssd),
-		_Knob('shadowOffset', 0, 60, _so, _sso),
+		_Knob('floorScale', 0, 4, _so, _sso),
 		_Knob('caustic', 0, 2, _ca, _sca),
 	]),
 	('Color', [
@@ -74,8 +74,8 @@ double _is(GlassMaterial m) => m.innerShadow;
 GlassMaterial _sis(GlassMaterial m, double v) => m.copyWith(innerShadow: v);
 double _sd(GlassMaterial m) => m.shadow;
 GlassMaterial _ssd(GlassMaterial m, double v) => m.copyWith(shadow: v);
-double _so(GlassMaterial m) => m.shadowOffset;
-GlassMaterial _sso(GlassMaterial m, double v) => m.copyWith(shadowOffset: v);
+double _so(GlassMaterial m) => m.floorScale;
+GlassMaterial _sso(GlassMaterial m, double v) => m.copyWith(floorScale: v);
 double _ca(GlassMaterial m) => m.caustic;
 GlassMaterial _sca(GlassMaterial m, double v) => m.copyWith(caustic: v);
 double _ts(GlassMaterial m) => m.tintStrength;
