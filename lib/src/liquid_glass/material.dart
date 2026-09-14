@@ -47,6 +47,10 @@ final class GlassMaterial {
 		this.rimWidth = 6,
 		this.fresnel = 0.25,
 		this.innerShadow = 0.15,
+		this.shadow = 0.3,
+		this.shadowOffset = 14,
+		this.caustic = 0.35,
+		this.waveCaustic = 4,
 		this.contentStrength = 0.6,
 		this.rippleStrength = 1,
 		this.frostSigma = 0,
@@ -74,6 +78,14 @@ final class GlassMaterial {
 	final double rimWidth;
 	final double fresnel;
 	final double innerShadow;
+	/// Darkening of the surface inside the silhouette shifted away from the light.
+	final double shadow;
+	/// How far the silhouette shifts; also the shadow's softness.
+	final double shadowOffset;
+	/// Focused-light crescent on the far side of the shadow.
+	final double caustic;
+	/// Floor brightening under wave crests, per unit of k²·h.
+	final double waveCaustic;
 	/// Content displacement per pixel of water envelope.
 	final double contentStrength;
 	/// Multiplies every touch amplitude; 0 turns the water off.
@@ -97,6 +109,10 @@ final class GlassMaterial {
 		double? rimWidth,
 		double? fresnel,
 		double? innerShadow,
+		double? shadow,
+		double? shadowOffset,
+		double? caustic,
+		double? waveCaustic,
 		double? contentStrength,
 		double? rippleStrength,
 		double? frostSigma,
@@ -116,6 +132,10 @@ final class GlassMaterial {
 		rimWidth: rimWidth ?? this.rimWidth,
 		fresnel: fresnel ?? this.fresnel,
 		innerShadow: innerShadow ?? this.innerShadow,
+		shadow: shadow ?? this.shadow,
+		shadowOffset: shadowOffset ?? this.shadowOffset,
+		caustic: caustic ?? this.caustic,
+		waveCaustic: waveCaustic ?? this.waveCaustic,
 		contentStrength: contentStrength ?? this.contentStrength,
 		rippleStrength: rippleStrength ?? this.rippleStrength,
 		frostSigma: frostSigma ?? this.frostSigma,

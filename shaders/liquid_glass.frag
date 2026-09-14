@@ -55,22 +55,28 @@ uniform float uRimWidth;     // [18] edge band for rim and inner shadow, px
 uniform float uFresnel;      // [19]
 uniform float uInnerShadow;  // [20]
 
-// [21] content
-uniform float uHasContent;       // [21] > 0.5: sampler 1 holds the content snapshot
-uniform vec4 uContentRect;       // [22..25] x, y, w, h in px; where sampler 1 sits on screen
-uniform float uContentStrength;  // [26] content displacement per px of water envelope
+// [21] floor: what the glass does to the surface under and around it
+uniform float uShadow;        // [21] darkening inside the silhouette shifted away from the light
+uniform float uShadowOffset;  // [22] silhouette shift, px; also sets the shadow's softness
+uniform float uCaustic;       // [23] focused-light crescent on the far side of the shadow
+uniform float uWaveCaustic;   // [24] floor brightening under wave crests
 
-// [27] water, shared by all touches: k rad/px, omega rad/s, reach px, tau s
+// [25] content
+uniform float uHasContent;       // [25] > 0.5: sampler 1 holds the content snapshot
+uniform vec4 uContentRect;       // [26..29] x, y, w, h in px; where sampler 1 sits on screen
+uniform float uContentStrength;  // [30] content displacement per px of water envelope
+
+// [31] water, shared by all touches: k rad/px, omega rad/s, reach px, tau s
 uniform vec4 uWave;
 
-// [31] ripple sources: x, y, age s, amplitude px; amplitude 0 = empty slot.
+// [35] ripple sources: x, y, age s, amplitude px; amplitude 0 = empty slot.
 // A stroke is a dense trail of these (Huygens); spacing must stay under half a wavelength.
 uniform vec4 uTouches[MAX_TOUCHES];
 
-// [159] shapes, SHAPE_STRIDE slots each; kind 0 = empty slot
+// [163] shapes, SHAPE_STRIDE slots each; kind 0 = empty slot
 uniform vec4 uShapes[MAX_SHAPES * SHAPE_STRIDE];
 
-// Total: 255 floats.
+// Total: 259 floats.
 
 uniform sampler2D uBackdrop;  // sampler 0, engine-filled; already blurred when frost is composed
 uniform sampler2D uContent;   // sampler 1, content snapshot, premultiplied
@@ -300,8 +306,20 @@ vec3 adjustColor(vec3 c) {
 	return mix(c, uTint.rgb, uTint.a);
 }
 
-vec4 composite(vec4 backdrop, vec4 content, Light lt, float sd, float mask) {
-	vec3 glass = adjustColor(backdrop.rgb);
+// Shadow and focused light on the surface beneath: (darken, brighten).
+// The crescent is the part of the shifted silhouette not covered by the glass —
+// automatically the side away from the light.
+vec2 floorLight(float sd, float sdShadow) {
+	float soft = max(0.5 * uShadowOffset, 2.0);
+	float inShadow = 1.0 - smoothstep(-soft, soft, sdShadow);
+	float crescent = inShadow * smoothstep(0.0, soft, sd) * (1.0 - smoothstep(0.0, 2.0 * soft, -sdShadow));
+	return vec2(uShadow * inShadow, uCaustic * crescent);
+}
+
+vec4 composite(vec4 backdrop, vec4 content, Light lt, float sd, float mask, vec2 floorL, float waterH) {
+	vec3 floorC = backdrop.rgb * (1.0 - floorL.x) + floorL.y;
+	floorC *= 1.0 + uWaveCaustic * uWave.x * uWave.x * waterH;
+	vec3 glass = adjustColor(floorC);
 	float band = 1.0 - smoothstep(0.0, uRimWidth, -sd);
 	glass *= 1.0 - uInnerShadow * band;
 	glass += vec3(lt.fresnel + lt.specular + lt.rim);
@@ -314,10 +332,16 @@ void main() {
 	float sd = sceneSd(p);
 	// Derivatives are undefined in divergent control flow: take them before the branch.
 	float aa = fwidth(sd);
+	vec2 lxy = uLight.xy;
+	float ll = length(lxy);
+	vec2 shift = ll > 1e-4 ? lxy / ll * uShadowOffset : vec2(0.0);
+	float sdShadow = (uShadow > 0.0 || uCaustic > 0.0) ? sceneSd(p + shift) : FAR;
+	vec2 floorL = floorLight(sd, sdShadow);
 	if (sd > aa) {
-		// Transparent, not a backdrop read: with frost composed, sampler 0 is
-		// already blurred; srcOver leaves the sharp original in place.
-		fragColor = vec4(0.0);
+		// Outside the glass: no backdrop read (with frost composed, sampler 0 is
+		// blurred). Premultiplied (add, alpha) darkens and brightens the sharp
+		// original through srcOver.
+		fragColor = vec4(vec3(floorL.y), floorL.x);
 		return;
 	}
 	float mask = coverage(sd, aa);
@@ -327,5 +351,8 @@ void main() {
 	vec4 backdrop = sampleBackdrop(p, n);
 	vec4 content = sampleContent(p, n, waveEnv);
 	Light lt = lighting(n, sd);
-	fragColor = composite(backdrop, content, lt, sd, mask);
+	vec4 glass = composite(backdrop, content, lt, sd, mask, floorL, water.x);
+	// The anti-aliased edge blends against the floor, not the untouched original.
+	vec4 floorOnly = vec4(vec3(floorL.y), floorL.x);
+	fragColor = glass + floorOnly * (1.0 - mask);
 }
