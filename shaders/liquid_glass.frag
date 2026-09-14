@@ -12,8 +12,9 @@ precision highp float;
 
 #define MAX_SHAPES 8
 #define MAX_TOUCHES 32
-// vec4 slots per shape: (kind, radius, bend, -), (p0.xy, p1.xy), (p2.xy, -, -).
-#define SHAPE_STRIDE 3
+// vec4 slots per shape: (kind, radius, bend, pullRadius), (p0.xy, p1.xy),
+// (p2.xy, grab.xy), (stretch.xy, pull.xy).
+#define SHAPE_STRIDE 4
 
 // No int uniforms exist: kinds are floats compared against half-way thresholds.
 const float KIND_NONE = 0.0;
@@ -75,7 +76,7 @@ uniform vec4 uTouches[MAX_TOUCHES];
 // [162] shapes, SHAPE_STRIDE slots each; kind 0 = empty slot
 uniform vec4 uShapes[MAX_SHAPES * SHAPE_STRIDE];
 
-// Total: 258 floats.
+// Total: 290 floats.
 
 uniform sampler2D uBackdrop;  // sampler 0, engine-filled; already blurred when frost is composed
 uniform sampler2D uContent;   // sampler 1, content snapshot, premultiplied
@@ -142,9 +143,36 @@ float smin(float a, float b, float k) {
 	return min(a, b) - h * h * k * 0.25;
 }
 
-float sdShape(vec2 p, vec4 s0, vec4 s1, vec4 s2) {
+// Elastic deformation as a domain warp. Stretch: the domain is compressed along
+// the motion axis and expanded across it by the same factor, so the outline
+// stretches with its area preserved. Pull: near the grab point the domain is
+// shifted back by the pull, so the outline follows the finger there. The result
+// is no longer an exact distance; fine for the |stretch| < 1 range in use.
+vec2 elasticWarp(vec2 p, vec2 anchor, vec4 s0, vec4 s2, vec4 s3) {
+	vec2 stretch = s3.xy, pull = s3.zw;
+	vec2 q = p;
+	float st = length(stretch);
+	if (st > 1e-4) {
+		vec2 dir = stretch / st;
+		vec2 perp = vec2(-dir.y, dir.x);
+		vec2 r = p - anchor;
+		float factor = 1.0 + st;
+		q = anchor + dir * (dot(r, dir) / factor) + perp * (dot(r, perp) * factor);
+	}
+	float pr = s0.w;
+	if (pr > 0.0 && dot(pull, pull) > 1e-6) {
+		vec2 g = p - s2.zw;
+		q -= pull * exp(-dot(g, g) / (pr * pr));
+	}
+	return q;
+}
+
+float sdShape(vec2 p, vec4 s0, vec4 s1, vec4 s2, vec4 s3) {
 	float kind = s0.x;
 	if (kind < 0.5) return FAR;
+	// Anchor: circle/box centre, capsule midpoint, bent capsule corner.
+	vec2 anchor = kind < 1.5 ? s1.xy : kind < 2.5 ? 0.5 * (s1.xy + s1.zw) : kind < 3.5 ? s1.xy : s1.zw;
+	p = elasticWarp(p, anchor, s0, s2, s3);
 	if (kind < 1.5) return sdCircle(p, s1.xy, s0.y);
 	if (kind < 2.5) return sdCapsule(p, s1.xy, s1.zw, s0.y);
 	if (kind < 3.5) return sdRoundedBox(p, s1.xy, s1.zw, s0.y);
@@ -155,7 +183,8 @@ float sdShape(vec2 p, vec4 s0, vec4 s1, vec4 s2) {
 #define SHAPE(i) smin(d, sdShape(p, \
 	uShapes[(i) * SHAPE_STRIDE], \
 	uShapes[(i) * SHAPE_STRIDE + 1], \
-	uShapes[(i) * SHAPE_STRIDE + 2]), uSmoothK)
+	uShapes[(i) * SHAPE_STRIDE + 2], \
+	uShapes[(i) * SHAPE_STRIDE + 3]), uSmoothK)
 
 float sceneSd(vec2 p) {
 	float d = FAR;

@@ -22,7 +22,7 @@ abstract final class _U {
 	static const wave = 30;
 	static const touches = 34, touchStride = 4, maxTouches = 32;
 	static const shapes = 162, maxShapes = 8;
-	static const total = 258;
+	static const total = 290;
 }
 
 /// One merged glass surface over [child]; positions are logical px from its top-left.

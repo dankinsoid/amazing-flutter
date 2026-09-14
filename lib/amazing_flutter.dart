@@ -1,3 +1,4 @@
+export 'src/elastic/elastic_body.dart';
 export 'src/liquid_glass/liquid_glass.dart';
 export 'src/liquid_glass/material.dart';
 export 'src/liquid_glass/ripples.dart';

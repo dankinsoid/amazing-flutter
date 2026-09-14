@@ -95,11 +95,54 @@ GlassMaterial _sre(GlassMaterial m, double v) => m.copyWith(wave: m.wave.copyWit
 double _lt(GlassMaterial m) => m.wave.lifetime;
 GlassMaterial _slt(GlassMaterial m, double v) => m.copyWith(wave: m.wave.copyWith(lifetime: v));
 
+class _BodyKnob {
+	const _BodyKnob(this.label, this.min, this.max, this.get, this.set);
+
+	final String label;
+	final double min;
+	final double max;
+	final double Function(ElasticBody b) get;
+	final void Function(ElasticBody b, double v) set;
+}
+
+const _bodyKnobs = <_BodyKnob>[
+	_BodyKnob('stiffness', 10, 600, _bst, _sbst),
+	_BodyKnob('damping', 0, 40, _bda, _sbda),
+	_BodyKnob('friction', 0, 20, _bfr, _sbfr),
+	_BodyKnob('stretch/speed', 0, 0.003, _bsp, _sbsp),
+	_BodyKnob('maxStretch', 0, 1.5, _bms, _sbms),
+	_BodyKnob('pullGain', 0, 1.5, _bpg, _sbpg),
+	_BodyKnob('pullRadius', 5, 150, _bpr, _sbpr),
+];
+
+double _bst(ElasticBody b) => b.stiffness;
+void _sbst(ElasticBody b, double v) => b.stiffness = v;
+double _bda(ElasticBody b) => b.damping;
+void _sbda(ElasticBody b, double v) => b.damping = v;
+double _bfr(ElasticBody b) => b.friction;
+void _sbfr(ElasticBody b, double v) => b.friction = v;
+double _bsp(ElasticBody b) => b.stretchPerSpeed;
+void _sbsp(ElasticBody b, double v) => b.stretchPerSpeed = v;
+double _bms(ElasticBody b) => b.maxStretch;
+void _sbms(ElasticBody b, double v) => b.maxStretch = v;
+double _bpg(ElasticBody b) => b.pullGain;
+void _sbpg(ElasticBody b, double v) => b.pullGain = v;
+double _bpr(ElasticBody b) => b.pullRadius;
+void _sbpr(ElasticBody b, double v) => b.pullRadius = v;
+
 class TuningPanel extends StatelessWidget {
-	const TuningPanel({super.key, required this.material, required this.onChanged});
+	const TuningPanel({
+		super.key,
+		required this.material,
+		required this.body,
+		required this.onChanged,
+		required this.onBodyChanged,
+	});
 
 	final GlassMaterial material;
+	final ElasticBody body;
 	final ValueChanged<GlassMaterial> onChanged;
+	final VoidCallback onBodyChanged;
 
 	@override
 	Widget build(BuildContext context) {
@@ -114,15 +157,23 @@ class TuningPanel extends StatelessWidget {
 							padding: const EdgeInsets.fromLTRB(12, 10, 12, 2),
 							child: Text(group, style: const TextStyle(color: Colors.white70, fontSize: 11, letterSpacing: 1)),
 						),
-						for (final k in knobs) _row(k),
+						for (final k in knobs) _row(k.label, k.get(material), k.min, k.max, (v) => onChanged(k.set(material, v))),
 					],
+					const Padding(
+						padding: EdgeInsets.fromLTRB(12, 10, 12, 2),
+						child: Text('Elastic', style: TextStyle(color: Colors.white70, fontSize: 11, letterSpacing: 1)),
+					),
+					for (final k in _bodyKnobs)
+						_row(k.label, k.get(body), k.min, k.max, (v) {
+							k.set(body, v);
+							onBodyChanged();
+						}),
 				],
 			),
 		);
 	}
 
-	Widget _row(_Knob k) {
-		final v = k.get(material);
+	Widget _row(String label, double v, double min, double max, ValueChanged<double> set) {
 		return SizedBox(
 			height: 34,
 			child: Row(
@@ -131,23 +182,23 @@ class TuningPanel extends StatelessWidget {
 						width: 96,
 						child: Padding(
 							padding: const EdgeInsets.only(left: 12),
-							child: Text(k.label, style: const TextStyle(color: Colors.white, fontSize: 12)),
+							child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 12)),
 						),
 					),
 					Expanded(
 						child: SliderTheme(
 							data: const SliderThemeData(trackHeight: 2, thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6)),
 							child: Slider(
-								value: v.clamp(k.min, k.max),
-								min: k.min,
-								max: k.max,
-								onChanged: (nv) => onChanged(k.set(material, nv)),
+								value: v.clamp(min, max),
+								min: min,
+								max: max,
+								onChanged: set,
 							),
 						),
 					),
 					SizedBox(
 						width: 44,
-						child: Text(v.toStringAsFixed(v < 10 ? 2 : 0), style: const TextStyle(color: Colors.white70, fontSize: 11)),
+						child: Text(v.toStringAsFixed(v < 0.1 ? 4 : v < 10 ? 2 : 0), style: const TextStyle(color: Colors.white70, fontSize: 11)),
 					),
 				],
 			),

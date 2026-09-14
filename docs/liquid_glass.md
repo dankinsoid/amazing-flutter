@@ -118,21 +118,31 @@ Declaration order is the `setFloat` index. Scalars first, arrays last, so changi
 | 29 | `uContentStrength` | float | 1 | content displacement per px of water envelope |
 | 30 | `uWave` | vec4 | 4 | k (rad/px), ω (rad/s), reach (px), τ (s) — shared by all sources |
 | 34 | `uTouches[32]` | vec4[32] | 128 | per source: x, y, age (s), amplitude (px); amplitude 0 = empty |
-| 162 | `uShapes[24]` | vec4[24] | 96 | 3 slots per shape, see below |
-| — | **total** | | **258** | |
+| 162 | `uShapes[32]` | vec4[32] | 128 | 4 slots per shape, see below |
+| — | **total** | | **290** | |
 | sampler 0 | `uBackdrop` | sampler2D | | **engine-filled**; already blurred when frost is composed |
 | sampler 1 | `uContent` | sampler2D | | content snapshot, premultiplied, `setImageSampler(1, …)` |
 
 GLES flips sampler 0 vertically; the shader corrects it under the compile-time
 `IMPELLER_TARGET_OPENGLES` macro, so no uniform is spent on it.
 
-Shape `i` occupies floats `162 + 12·i` … `162 + 12·i + 11`:
+Shape `i` occupies floats `162 + 16·i` … `162 + 16·i + 15`:
 
 | Slot | Components | circle | capsule | rounded box | bent capsule |
 |---|---|---|---|---|---|
-| 0 | kind, radius, bend, – | 1, r | 2, r | 3, corner r | 4, r, corner rounding |
+| 0 | kind, radius, bend, pullRadius | 1, r | 2, r | 3, corner r | 4, r, corner rounding |
 | 1 | p0.xy, p1.xy | centre | a, b | centre, half-size | a, corner |
-| 2 | p2.xy, –, – | | | | b |
+| 2 | p2.xy, grab.xy | | | | b |
+| 3 | stretch.xy, pull.xy | | | | |
+
+Slots 2.zw and 3 are the **elastic deformation**, applied as a domain warp before
+the primitive: the domain is compressed along `stretch` and expanded across it by
+the same factor (area-preserving squash and stretch about the shape's anchor), and
+near `grab` it is shifted back by `pull` with a Gaussian falloff of `pullRadius`, so
+the outline follows the finger there. The physics that produces these lives in
+`ElasticBody` (Dart, renderer-agnostic); the warp is ~15 lines of GLSL that other
+shaders copy, per the single-file rule. A warped SDF is not an exact distance;
+fine for |stretch| < 1.
 
 Verified offline with this SDK's `impellerc` (3.38.9, `darwin-x64`): the skeleton
 compiles for the metal, gles, gles3, vulkan and sksl stages, and every runtime
