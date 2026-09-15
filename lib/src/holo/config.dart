@@ -16,7 +16,7 @@ class HoloConfig {
 		this.foil = 0.85,
 		this.glare = 0.55,
 		this.grain = 0.25,
-		this.bandScale = 2.2,
+		this.bandScale = 2.8,
 		this.radius = 18,
 		this.seed = 0,
 		this.maxAngle = 12 * math.pi / 180,
@@ -86,7 +86,7 @@ class HoloConfig {
 
 	static const galaxy = HoloConfig(
 		pattern: HoloPattern.galaxy,
-		mask: HoloMask.card,
+		mask: HoloMask.luminance,
 		foil: 0.8,
 		glare: 0.65,
 		grain: 0.1,

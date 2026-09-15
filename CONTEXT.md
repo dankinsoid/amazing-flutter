@@ -63,8 +63,8 @@ Each step exists to unblock the next, not because it is the prettiest.
 
 | Primitive | Mechanism | Used by |
 |---|---|---|
-| self-contained | plain `FragmentShader` | holographic, aurora, metaballs |
-| over a child snapshot | `toImageSync` / sampler | fold, page curl, genie, disintegration |
+| self-contained | plain `FragmentShader` | aurora, metaballs |
+| over a child snapshot | `toImageSync` / sampler | holographic, fold, page curl, genie, disintegration |
 | over the backdrop | `ImageFilter.shader` + `BackdropGroup` | glass, progressive blur, water |
 | multi-pass ping-pong | `toImageSync` chain, `lib/src/fluid/passes.dart` | fluid, any iterative solve |
 
@@ -79,16 +79,33 @@ target and the old one is retired a frame late, because `toImageSync` rasterises
 lazily. Anything iterative (a Poisson solve, a mip pyramid, a blur chain) belongs
 on it. Details and its cost model: `docs/fluid.md` §8.
 
-**2. Holographic card.** Self-contained, zero infrastructure, best
-wow-to-effort ratio in the whole survey — and the only effect that *requires* a
-phone in hand, since you cannot fake accelerometer response with a screenshot.
-Use it to shake down the pipeline before touching backdrop machinery.
+**2. Holographic card. Done.** `shaders/holo.frag` plus `lib/src/holo/`:
+one pass over the card's own snapshot, three patterns, a surface normal from the
+tilt and a specular lobe around the pointer — so the foil *faces the light*
+rather than merely moving, which is the one thing the CSS reference cannot do.
+Design, uniform table and the measurements: `docs/holo.md`.
 
-The hard part is sensor handling, not the shader: filter with One Euro
-(adaptive — smooths at rest, stays responsive in motion), take the gravity vector
-separately from linear acceleration (otherwise walking shakes the card), and run
-the angle through a spring so the card trails the tilt with slight inertia. Glass
-specular later reuses the same light vector.
+The hard part was sensor handling, as predicted: One Euro (adaptive — smooths at
+rest, stays responsive in motion) over raw gravity, minus a rest pose that drifts
+with τ = 3 s, so the card is flat however the phone is held and a walk settles
+out instead of shaking it. Glass specular later reuses the same light vector.
+
+**Cursor on desktop, sensors on phone — and both are opt-ins.** `pointer` and
+`sensors` are independent flags on `HoloCard`; every combination works, including
+neither (controller-driven). With both on the finger wins while it is down and the
+release spring returns to the live sensor tilt. sensors_plus ships Android, iOS
+and web only, so the driver is a no-op on macOS rather than a crash. The 3D
+rotation is separate again: `maxAngle = 0` leaves the card flat while the foil
+still reacts, and when it is on it is a plain Dart `Transform` with a perspective
+entry — a layer matrix, not an extra GPU pass.
+
+**`SnapshotWidget` is the right primitive for an effect over a *static* child.**
+Verified in the 3.47.4 SDK: the raster is reused when only the `SnapshotPainter`
+notifies, so repainting on every pointer move costs one fragment pass and no
+re-rasterisation — but it is **not** regenerated when the child itself repaints,
+only by `SnapshotController.clear()`, an `allowSnapshotting` flip, a detach, or
+`autoresize` seeing a new size. `lib/src/snapshot/` stays the primitive for the
+other case: freezing a child *on a gesture* and hiding it.
 
 **3. Tab bar — progressive blur + glass pill.** First real use of the backdrop
 primitive, and it doubles as the skeleton of water UI. Naive `blur + alpha mask`
@@ -160,6 +177,10 @@ table and the inverse-mapping trap that shapes it are in `docs/disintegration.md
   `FLTEnableImpeller` in `macos/Runner/Info.plist` so the app itself defaults to
   Impeller. On Skia `ImageFilter.shader` is unsupported and `fwidth()` does not
   even compile to SkSL — guard the `FragmentProgram` load, not just the filter.
+- `sensors_plus` 7.1.0 declares plugins for **Android, iOS and web only** — no
+  macOS, Windows or Linux. Anything reading sensors must check the platform
+  first; the stream on an unregistered plugin fails at runtime, not at compile
+  time.
 - Target platforms: iOS and macOS first (Impeller/Metal). Web runs Skia, so the
   backdrop primitive will not work there — plan the fallback, don't plan the demo
   around it.

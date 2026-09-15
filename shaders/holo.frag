@@ -195,14 +195,14 @@ void main() {
 	} else if (isPattern(PATTERN_GALAXY)) {
 		// Cosmos: a dark plasma the colour rides on, dense stars glinting in and out.
 		float cloud = fbm(uv * vec2(3.2 * aspect, 3.2) + uSeed * 7.0);
-		foil = palette(band * 0.55 + cloud * 0.40) * (0.18 + 1.05 * smoothstep(0.30, 0.85, cloud));
+		foil = palette(band * 0.55 + cloud * 0.40) * (0.18 + 1.00 * smoothstep(0.30, 0.85, cloud));
 		foil += vec3(1.0) * sparkle(frag, 7.0, 0.85, glint * 2.1, uSeed + 11.0) * 1.9;
 		foil += vec3(0.75, 0.85, 1.0) * sparkle(frag, 17.0, 0.40, glint * 1.3 + 2.0, uSeed + 23.0) * 1.3;
-		foil = saturate(contrast(foil, 1.35), 1.25);
+		foil = saturate(contrast(foil, 1.20), 1.05);
 	} else {
 		// Classic: wide diagonal bands over a fine grating, the 110deg rainbow of the site.
-		float grating = 0.5 + 0.5 * cos(dot(frag, vec2(0.0, 1.0)) * 1.05);
-		foil = palette(band) * mix(0.82, 1.18, grating);
+		float grating = 0.5 + 0.5 * cos(frag.y * 0.85);
+		foil = palette(band) * mix(0.90, 1.10, grating);
 		foil = saturate(contrast(foil, 1.85), 0.85);
 	}
 
