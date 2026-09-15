@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 
 import 'disintegration_demo.dart';
+import 'fluid_demo.dart';
 import 'liquid_glass_demo.dart';
 import 'snap.dart';
 
@@ -31,7 +32,7 @@ class _Home extends StatefulWidget {
 const _debugTab = 0;
 
 class _HomeState extends State<_Home> {
-	static const _titles = ['Liquid glass', 'Disintegration'];
+	static const _titles = ['Liquid glass', 'Disintegration', 'Fluid'];
 	int _index = _debugTab;
 
 	@override
@@ -41,7 +42,7 @@ class _HomeState extends State<_Home> {
 				Positioned.fill(
 					child: IndexedStack(
 						index: _index,
-						children: const [LiquidGlassDemo(), DisintegrationDemo()],
+						children: const [LiquidGlassDemo(), DisintegrationDemo(), FluidDemo()],
 					),
 				),
 				Positioned(top: 8, left: 8, child: _switcher()),

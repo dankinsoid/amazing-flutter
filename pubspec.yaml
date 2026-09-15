@@ -21,3 +21,11 @@ flutter:
   shaders:
     - shaders/liquid_glass.frag
     - shaders/disintegration.frag
+    - shaders/fluid_advection.frag
+    - shaders/fluid_curl.frag
+    - shaders/fluid_divergence.frag
+    - shaders/fluid_display.frag
+    - shaders/fluid_gradient.frag
+    - shaders/fluid_pressure.frag
+    - shaders/fluid_splat.frag
+    - shaders/fluid_vorticity.frag
