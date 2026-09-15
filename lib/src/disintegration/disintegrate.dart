@@ -15,8 +15,9 @@ abstract final class _U {
 	static const cellSize = 13, drift = 14, lift = 15, jitter = 16, spin = 17, shrink = 18;
 	static const noiseScale = 19, turbulence = 20, radial = 21;
 	static const softness = 22, sweep = 23, blur = 24, fade = 25, edgeFade = 26;
-	static const erodeRadius = 27, erodeGrowth = 28, erodeDrag = 29, erodeSwirl = 30, erodeVortex = 31;
-	static const trail = 32, trailDir = 160, trailStride = 4, maxTrail = 32;
+	static const erodeRadius = 27, erodeSpread = 28, erodeExpand = 29, erodeSwirl = 30;
+	static const erodeVortex = 31, erodeLifetime = 32;
+	static const trail = 33, trailDir = 161, trailStride = 4, maxTrail = 32;
 }
 
 /// Dissolves [child] on a swipe: shards, smoke, or blown out of the finger.
@@ -123,9 +124,10 @@ class _DisintegrateState extends State<Disintegrate> with SingleTickerProviderSt
 		final along = velocity.dx * direction.dx + velocity.dy * direction.dy;
 		if (_effect.mode == DisintegrationMode.erode) {
 			// Any real stroke destroys the widget; only a tap-length scratch heals.
+			// The smoke thins over its own lifetime; a release fling would be a second story.
 			_effect.settle(
 				dismiss: _effect.trail.length > widget.config.dismissDistance * 0.25,
-				velocity: velocity.distance / widget.config.dismissDistance,
+				spring: DisintegrationController.springFor(widget.config.erodeLifetime),
 			);
 			return;
 		}
@@ -227,10 +229,11 @@ class _DisintegrationPainter extends ChildSnapshotPainter {
 			..setFloat(_U.fade, config.fade)
 			..setFloat(_U.edgeFade, config.edgeFade)
 			..setFloat(_U.erodeRadius, config.erodeRadius)
-			..setFloat(_U.erodeGrowth, config.erodeGrowth)
-			..setFloat(_U.erodeDrag, config.erodeDrag)
+			..setFloat(_U.erodeSpread, config.erodeSpread)
+			..setFloat(_U.erodeExpand, config.erodeExpand)
 			..setFloat(_U.erodeSwirl, config.erodeSwirl)
-			..setFloat(_U.erodeVortex, config.erodeVortex);
+			..setFloat(_U.erodeVortex, config.erodeVortex)
+			..setFloat(_U.erodeLifetime, config.erodeLifetime);
 		if (effect.mode == DisintegrationMode.erode) _writeTrail(shader, rect);
 		shader.setImageSampler(0, snapshot);
 	}

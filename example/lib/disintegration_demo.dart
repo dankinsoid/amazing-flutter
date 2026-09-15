@@ -6,6 +6,8 @@ import 'dart:math' as math;
 import 'package:amazing_flutter/amazing_flutter.dart';
 import 'package:flutter/material.dart';
 
+import 'snap.dart';
+
 // Screenshot hook: a progress below 0 leaves the screen interactive.
 const _debugProgress = -1.0;
 const _debugMode = DisintegrationMode.shards;
@@ -13,6 +15,8 @@ const _debugAngle = 0.0;
 // Erode screenshot hook: draws a synthetic stroke, then parks a global progress on top.
 const _debugStroke = false;
 const _debugStrokeProgress = -1.0;
+// Seconds after the stroke at which a snap is written; see snap.dart.
+const _debugSnapAt = <double>[];
 
 typedef _Read = double Function(DisintegrationConfig c);
 typedef _Write = DisintegrationConfig Function(DisintegrationConfig c, double v);
@@ -28,7 +32,7 @@ class _Knob {
 }
 
 const _knobs = <_Knob>[
-	_Knob('cellSize', 4, 60, _cs, _scs),
+	_Knob('cellSize', 0.5, 60, _cs, _scs),
 	_Knob('drift', 0, 300, _dr, _sdr),
 	_Knob('lift', -100, 200, _li, _sli),
 	_Knob('jitter', 0, 300, _ji, _sji),
@@ -42,8 +46,9 @@ const _knobs = <_Knob>[
 	_Knob('blur', 0, 30, _bl, _sbl),
 	_Knob('fade', 0.2, 4, _fa, _sfa),
 	_Knob('erodeRadius', 5, 80, _er, _ser),
-	_Knob('erodeGrowth', 0, 120, _eg, _seg),
-	_Knob('erodeDrag', 0, 120, _ed, _sed),
+	_Knob('erodeSpread', 0, 600, _eg, _seg),
+	_Knob('erodeExpand', 0, 120, _ed, _sed),
+	_Knob('erodeLife', 0.3, 6, _el, _sel),
 	_Knob('erodeSwirl', 0, 150, _et, _set),
 	_Knob('erodeVortex', 0, 150, _ev, _sev),
 	_Knob('trailSpacing', 4, 40, _ts, _sts),
@@ -77,10 +82,12 @@ double _fa(DisintegrationConfig c) => c.fade;
 DisintegrationConfig _sfa(DisintegrationConfig c, double v) => c.copyWith(fade: v);
 double _er(DisintegrationConfig c) => c.erodeRadius;
 DisintegrationConfig _ser(DisintegrationConfig c, double v) => c.copyWith(erodeRadius: v);
-double _eg(DisintegrationConfig c) => c.erodeGrowth;
-DisintegrationConfig _seg(DisintegrationConfig c, double v) => c.copyWith(erodeGrowth: v);
-double _ed(DisintegrationConfig c) => c.erodeDrag;
-DisintegrationConfig _sed(DisintegrationConfig c, double v) => c.copyWith(erodeDrag: v);
+double _eg(DisintegrationConfig c) => c.erodeSpread;
+DisintegrationConfig _seg(DisintegrationConfig c, double v) => c.copyWith(erodeSpread: v);
+double _ed(DisintegrationConfig c) => c.erodeExpand;
+DisintegrationConfig _sed(DisintegrationConfig c, double v) => c.copyWith(erodeExpand: v);
+double _el(DisintegrationConfig c) => c.erodeLifetime;
+DisintegrationConfig _sel(DisintegrationConfig c, double v) => c.copyWith(erodeLifetime: v);
 double _et(DisintegrationConfig c) => c.erodeSwirl;
 DisintegrationConfig _set(DisintegrationConfig c, double v) => c.copyWith(erodeSwirl: v);
 double _ev(DisintegrationConfig c) => c.erodeVortex;
@@ -130,6 +137,7 @@ class _DisintegrationDemoState extends State<DisintegrationDemo> with TickerProv
 			}
 			_freeze(_debugProgress);
 			debugPrint('debug freeze: mode=${_debugMode.name} progress=$_debugProgress angle=$_debugAngle');
+			_scheduleSnaps();
 		});
 	}
 
@@ -142,7 +150,7 @@ class _DisintegrationDemoState extends State<DisintegrationDemo> with TickerProv
 			effect.beginDrag(from);
 		}
 		var i = 0;
-		Timer.periodic(const Duration(milliseconds: 50), (timer) {
+		Timer.periodic(const Duration(milliseconds: 16), (timer) {
 			i++;
 			for (final effect in _effects) {
 				effect.erode(Offset.lerp(from, to, i / steps)!);
@@ -150,6 +158,7 @@ class _DisintegrationDemoState extends State<DisintegrationDemo> with TickerProv
 			if (i < steps) return;
 			timer.cancel();
 			debugPrint('debug stroke: mode=${_debugMode.name} points=${_effects.first.trail.points.length} progress=$_debugStrokeProgress');
+			_scheduleSnaps();
 			if (_debugStrokeProgress < 0) return;
 			for (final effect in _effects) {
 				effect.freeze(_debugStrokeProgress);
@@ -186,6 +195,19 @@ class _DisintegrationDemoState extends State<DisintegrationDemo> with TickerProv
 		});
 	}
 
+	void _scheduleSnaps() {
+		if (_debugSnapAt.isEmpty) return;
+		final dpr = MediaQuery.devicePixelRatioOf(context);
+		startSnapPump();
+		var pending = _debugSnapAt.length;
+		for (final at in _debugSnapAt) {
+			Future<void>.delayed(Duration(milliseconds: (at * 1000).round()), () async {
+				await writeSnap('${at.toStringAsFixed(2)}s', dpr);
+				if (--pending == 0) stopSnapPump();
+			});
+		}
+	}
+
 	void _restore() {
 		setState(() {
 			_frozen = 0;
@@ -200,7 +222,7 @@ class _DisintegrationDemoState extends State<DisintegrationDemo> with TickerProv
 	Widget build(BuildContext context) {
 		return Stack(
 			children: [
-				Positioned.fill(child: _scene()),
+				Positioned.fill(child: _sceneView()),
 				if (_panel) Positioned(top: 0, right: 0, bottom: 0, child: _controls()),
 				Positioned(
 					top: 8,
@@ -214,7 +236,7 @@ class _DisintegrationDemoState extends State<DisintegrationDemo> with TickerProv
 		);
 	}
 
-	Widget _scene() {
+	Widget _sceneView() {
 		return DecoratedBox(
 			decoration: const BoxDecoration(
 				gradient: LinearGradient(

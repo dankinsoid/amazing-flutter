@@ -4,8 +4,9 @@ import 'package:flutter/material.dart';
 
 import 'disintegration_demo.dart';
 import 'liquid_glass_demo.dart';
+import 'snap.dart';
 
-void main() => runApp(const DemoApp());
+void main() => runApp(RepaintBoundary(key: snapKey, child: const DemoApp()));
 
 class DemoApp extends StatelessWidget {
 	const DemoApp({super.key});

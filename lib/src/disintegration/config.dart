@@ -9,7 +9,7 @@ enum DisintegrationMode { shards, smoke, blowAway, erode }
 @immutable
 final class DisintegrationConfig {
 	const DisintegrationConfig({
-		this.cellSize = 15,
+		this.cellSize = 1,
 		this.drift = 70,
 		this.lift = 26,
 		this.jitter = 14,
@@ -19,10 +19,11 @@ final class DisintegrationConfig {
 		this.turbulence = 110,
 		this.radial = 0.75,
 		this.erodeRadius = 16,
-		this.erodeGrowth = 8,
-		this.erodeDrag = 10,
-		this.erodeSwirl = 55,
-		this.erodeVortex = 48,
+		this.erodeSpread = 150,
+		this.erodeExpand = 10,
+		this.erodeSwirl = 30,
+		this.erodeVortex = 40,
+		this.erodeLifetime = 1.6,
 		this.trailSpacing = 10,
 		this.softness = 0.3,
 		this.sweep = 0.6,
@@ -35,7 +36,7 @@ final class DisintegrationConfig {
 		this.flingVelocity = 700,
 	});
 
-	/// Shards and blow-away: grid cell edge before the lattice is warped.
+	/// Shards and blow-away: grid cell edge before the lattice is warped; 1 is pixel dust.
 	final double cellSize;
 
 	/// Smooth displacement at full departure.
@@ -62,20 +63,23 @@ final class DisintegrationConfig {
 	/// Blow-away: radial vs swipe direction in the flow, 0..1.
 	final double radial;
 
-	/// Erode: hole radius under a fresh stroke point.
+	/// Erode: disturbance radius under a fresh stroke point.
 	final double erodeRadius;
 
-	/// Erode: radius the hole gains per second.
-	final double erodeGrowth;
+	/// Erode: radius the front gains per second; sets how fast the touch reaches the corners.
+	final double erodeSpread;
 
-	/// Erode: pull along the stroke where it bites hardest.
-	final double erodeDrag;
+	/// Erode: outward drift away from each stroke point.
+	final double erodeExpand;
 
 	/// Erode: curl-noise eddies inside the eaten band.
 	final double erodeSwirl;
 
-	/// Erode: counter-rotating pair dragged behind each stroke point.
+	/// Erode: swirl around the finger, fading once it leaves.
 	final double erodeVortex;
+
+	/// Erode: disturbance-seconds over which the smoke thins to nothing.
+	final double erodeLifetime;
 
 	/// Erode: stroke travel between trail points; under [erodeRadius], or the band beads.
 	final double trailSpacing;
@@ -123,18 +127,16 @@ final class DisintegrationConfig {
 	);
 
 	static const erode = DisintegrationConfig(
-		drift: 60,
-		lift: 40,
 		noiseScale: 0.03,
-		turbulence: 90,
-		softness: 0.4,
-		sweep: 0,
-		blur: 14,
-		fade: 0.7,
+		blur: 16,
+		fade: 1,
+		spread: 200,
+		dismissDistance: 140,
 	);
 
 	static const blowAway = DisintegrationConfig(
 		cellSize: 11,
+		seed: 1,
 		drift: 150,
 		lift: 10,
 		jitter: 10,
@@ -164,10 +166,11 @@ final class DisintegrationConfig {
 		double? turbulence,
 		double? radial,
 		double? erodeRadius,
-		double? erodeGrowth,
-		double? erodeDrag,
+		double? erodeSpread,
+		double? erodeExpand,
 		double? erodeSwirl,
 		double? erodeVortex,
+		double? erodeLifetime,
 		double? trailSpacing,
 		double? softness,
 		double? sweep,
@@ -189,10 +192,11 @@ final class DisintegrationConfig {
 		turbulence: turbulence ?? this.turbulence,
 		radial: radial ?? this.radial,
 		erodeRadius: erodeRadius ?? this.erodeRadius,
-		erodeGrowth: erodeGrowth ?? this.erodeGrowth,
-		erodeDrag: erodeDrag ?? this.erodeDrag,
+		erodeSpread: erodeSpread ?? this.erodeSpread,
+		erodeExpand: erodeExpand ?? this.erodeExpand,
 		erodeSwirl: erodeSwirl ?? this.erodeSwirl,
 		erodeVortex: erodeVortex ?? this.erodeVortex,
+		erodeLifetime: erodeLifetime ?? this.erodeLifetime,
 		trailSpacing: trailSpacing ?? this.trailSpacing,
 		softness: softness ?? this.softness,
 		sweep: sweep ?? this.sweep,

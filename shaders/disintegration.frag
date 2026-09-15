@@ -50,18 +50,19 @@ uniform float uFade;      // [25] alpha exponent while departing
 uniform float uEdgeFade;  // [26] fade band at the canvas border, px
 
 // [27] erode: what the finger destroys as it passes
-uniform float uErodeRadius;      // [27] hole radius under a fresh stroke point, px
-uniform float uErodeGrowth;      // [28] radius the hole gains per second, px/s
-uniform float uErodeDrag;    // [29] pull along the stroke where it bites hardest, px
-uniform float uErodeSwirl;   // [30] curl-noise eddies inside the eaten band, px
-uniform float uErodeVortex;  // [31] counter-rotating pair dragged behind each point, px
+uniform float uErodeRadius;    // [27] disturbance radius under a fresh stroke point, px
+uniform float uErodeSpread;    // [28] radius the front gains per second, px/s
+uniform float uErodeExpand;    // [29] outward drift away from each point, px
+uniform float uErodeSwirl;     // [30] curl-noise eddies, px
+uniform float uErodeVortex;    // [31] swirl around the finger, px
+uniform float uErodeLifetime;  // [32] disturbance-seconds over which the smoke thins to nothing
 
-// [32] stroke points: x, y in canvas px, age s, strength; strength 0 = empty slot.
+// [33] stroke points: x, y in canvas px, age s, strength; strength 0 = empty slot.
 uniform vec4 uTrail[MAX_TRAIL];
-// [160] unit stroke direction at that point in xy; zw unused.
+// [161] unit stroke direction at that point in xy; zw unused.
 uniform vec4 uTrailDir[MAX_TRAIL];
 
-// Total: 288 floats.
+// Total: 289 floats.
 
 uniform sampler2D uSnapshot;  // sampler 0, frozen child, premultiplied
 
@@ -116,7 +117,8 @@ vec2 curl(vec2 p, float scale) {
 	float n0 = valueNoise(c);
 	float nx = valueNoise(c + vec2(h, 0.0));
 	float ny = valueNoise(c + vec2(0.0, h));
-	return vec2(ny - n0, n0 - nx) / h;
+	// Halved so the field is roughly unit length and the knob reads in px.
+	return vec2(ny - n0, n0 - nx) * (0.5 / h);
 }
 
 // ---- 1. Flow field ----
@@ -152,33 +154,38 @@ vec2 flow(vec2 p, float t) {
 // ---- 2. Trail ----
 
 struct Trail {
-	float eaten;  // 0 untouched, 1 destroyed
-	vec2 drag;    // pull along the stroke, px
-	vec2 spin;    // tangential velocity of the vortex pairs, px
-	float age;    // seconds since the finger passed here
+	float touched;  // 0 undisturbed, 1 inside the front
+	float weight;   // summed influence, for the weighted means
+	vec2 expand;    // outward drift, px
+	vec2 spin;      // swirl around the finger, px
+	float age;      // seconds since the finger passed here
 };
 
 Trail trailPoint(vec2 p, vec4 t, vec4 dir) {
 	Trail s;
-	s.eaten = 0.0;
-	s.drag = vec2(0.0);
+	s.touched = 0.0;
+	s.weight = 0.0;
+	s.expand = vec2(0.0);
 	s.spin = vec2(0.0);
 	s.age = 0.0;
 	if (t.w <= 0.0) return s;
-	float radius = max(uErodeRadius + uErodeGrowth * t.z, 1.0);
+	// The front must cross a whole widget between "corners still crisp" and "all eddies",
+	// and sqrt(age) has nowhere near that range over a second: grow it linearly.
+	float radius = max(uErodeRadius + uErodeSpread * max(t.z, 0.0), 1.0);
 	vec2 v = p - t.xy;
 	float k = dot(v, v) / (radius * radius);
 	if (k > 9.0) return s;  // past three sigma the point cannot matter
 	float w = t.w * exp(-k);
-	// The smear keeps running after the finger has left.
-	float aged = w * (1.0 + t.z);
+	vec2 away = v * inversesqrt(dot(v, v) + 1.0);
 	vec2 side = vec2(-dir.y, dir.x);
 	// The sense flips across the stroke: a finger leaves two counter-rotating eddies.
 	float across = clamp(dot(v, side) / radius, -1.0, 1.0);
-	vec2 tangent = vec2(-v.y, v.x) / max(length(v), 1.0);
-	s.eaten = w;
-	s.drag = dir.xy * (aged * uErodeDrag);
-	s.spin = tangent * (across * aged * uErodeVortex);
+	vec2 tangent = vec2(-v.y, v.x) * inversesqrt(dot(v, v) + 1.0);
+	s.touched = w;
+	s.weight = w;
+	s.expand = away * (w * (1.0 + t.z));
+	// Strongest under the finger and fading once it has left.
+	s.spin = tangent * (across * w * exp(-t.z / max(uErodeLifetime, 0.05)));
 	s.age = w * t.z;
 	return s;
 }
@@ -186,13 +193,15 @@ Trail trailPoint(vec2 p, vec4 t, vec4 dir) {
 // Impeller indexes uniform arrays by constants only; the loop is unrolled by macro.
 #define TRAIL(i) { \
 	Trail s = trailPoint(p, uTrail[i], uTrailDir[i]); \
-	acc.eaten += s.eaten; acc.drag += s.drag; acc.spin += s.spin; acc.age += s.age; \
+	acc.touched = max(acc.touched, s.touched); acc.weight += s.weight; \
+	acc.expand += s.expand; acc.spin += s.spin; acc.age += s.age; \
 }
 
 Trail trailField(vec2 p) {
 	Trail acc;
-	acc.eaten = 0.0;
-	acc.drag = vec2(0.0);
+	acc.touched = 0.0;
+	acc.weight = 0.0;
+	acc.expand = vec2(0.0);
 	acc.spin = vec2(0.0);
 	acc.age = 0.0;
 	TRAIL(0);  TRAIL(1);  TRAIL(2);  TRAIL(3);
@@ -203,17 +212,23 @@ Trail trailField(vec2 p) {
 	TRAIL(20); TRAIL(21); TRAIL(22); TRAIL(23);
 	TRAIL(24); TRAIL(25); TRAIL(26); TRAIL(27);
 	TRAIL(28); TRAIL(29); TRAIL(30); TRAIL(31);
-	acc.age /= max(acc.eaten, 1e-4);
-	acc.eaten = clamp(acc.eaten, 0.0, 1.0);
+	// Weighted means, or a long stroke would push every pixel 32 times as hard.
+	// The front is the nearest point's reach, not the sum: stroke length must not deepen it.
+	float total = max(acc.weight, 1e-4);
+	acc.age /= total;
+	acc.touched = clamp(acc.touched, 0.0, 1.0);
+	acc.expand *= uErodeExpand * acc.touched / total;
+	acc.spin *= uErodeVortex * acc.touched / total;
 	return acc;
 }
 
 // ---- 3. Cells ----
 
 vec2 cellOf(vec2 q) {
-	vec2 g = (q - uChildRect.xy) / max(uCellSize, 1.0);
-	// Warp the lattice, or the shards read as a chessboard.
-	g += noise2(g * 0.7) * 0.8;
+	// A quarter of a logical px is finer than any display: the floor is the pixel grid.
+	vec2 g = (q - uChildRect.xy) / max(uCellSize, 0.25);
+	// Warp the lattice, or the shards read as a chessboard; pointless once cells are pixels.
+	g += noise2(g * 0.7) * (0.8 * smoothstep(2.0, 6.0, uCellSize));
 	return floor(g);
 }
 
@@ -259,27 +274,25 @@ struct Grain {
 	float smear; // how hard to blur the read
 };
 
-// The finger destroys what it passed over; uProgress only clears the leftovers.
-Grain erodeGrain(vec2 p, float softness) {
+// The card is one cloud held in the shape of a widget; the touch stirs it loose.
+Grain erodeGrain(vec2 p) {
 	Trail tr = trailField(p);
-	// The eddy pattern travels with the smoke rather than sitting frozen on screen.
-	vec2 advected = p - uDirection * (uErodeDrag * tr.age);
+	float t = tr.age / max(uErodeLifetime, 0.05);
+	// A pixel comes loose the moment the front reaches it, and keeps loosening with time.
+	float loose = tr.touched * (0.15 + t);
+	// The eddy pattern turns over rather than sitting frozen on screen.
+	vec2 advected = p + tr.expand * tr.age;
 	// Coarse lobes grow in as the smoke ages; the fine octave carries the detail.
 	vec2 swirl = curl(advected, uNoiseScale) + curl(advected, uNoiseScale * 0.25) * clamp(tr.age, 0.0, 2.0);
-	// Full swirl through the fringe, where content is still visible; none out on the flat card.
-	float stirred = smoothstep(0.0, 0.35, tr.eaten);
-	vec2 d = tr.drag + tr.spin
-		+ swirl * (uErodeSwirl * stirred)
-		+ uDirection * (uDrift * uProgress * uProgress);
-	float eaten = tr.eaten;
+	vec2 d = (tr.expand + tr.spin) * (0.15 + t) + swirl * (uErodeSwirl * loose);
 	Grain g;
 	g.q = p - d;
-	// One threshold for both: the stroke eats past it, the global dissolve reaches it later.
-	float order = fbm(g.q * uNoiseScale);
-	g.gone = max(
-		smoothstep(order - softness, order + softness, eaten),
-		departure(order, uProgress, softness));
-	g.smear = eaten;
+	float spent = tr.touched * t;
+	// Low-contrast grain so the cloud frays as it thins; never a threshold hole.
+	spent *= 0.6 + 0.8 * fbm(g.q * uNoiseScale);
+	// uProgress only guarantees termination: it thins whatever is left.
+	g.gone = max(smoothstep(0.0, 1.0, spent), uProgress);
+	g.smear = clamp(tr.touched * t, 0.0, 1.0);
 	return g;
 }
 
@@ -319,7 +332,7 @@ void main() {
 	// The other modes must not pay for the 32-point loop: branch, do not select.
 	Grain g;
 	if (isMode(MODE_ERODE)) {
-		g = erodeGrain(p, softness);
+		g = erodeGrain(p);
 	} else {
 		g = dissolveGrain(p, softness);
 	}

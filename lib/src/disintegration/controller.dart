@@ -91,14 +91,21 @@ class DisintegrationController extends ChangeNotifier {
 	}
 
 	/// [velocity] is in progress units per second, signed along [direction].
-	void settle({required bool dismiss, double velocity = 0}) {
-		_run(dismiss ? 1 : 0, velocity);
+	void settle({required bool dismiss, double velocity = 0, SpringDescription? spring}) {
+		_run(dismiss ? 1 : 0, velocity, spring);
 	}
+
+	/// Critically damped and settling in about [seconds]; still a spring, not a duration.
+	static SpringDescription springFor(double seconds) => SpringDescription.withDampingRatio(
+		mass: 1,
+		stiffness: 16 / (seconds * seconds),
+		ratio: 1,
+	);
 
 	void play({Offset? direction, Offset? origin, double velocity = 1.5}) {
 		if (direction != null) _direction = _unit(direction);
 		if (origin != null) _origin = origin;
-		_run(1, velocity);
+		_run(1, velocity, null);
 	}
 
 	/// Debug entry point: parks progress without a simulation.
@@ -124,7 +131,7 @@ class DisintegrationController extends ChangeNotifier {
 		notifyListeners();
 	}
 
-	void _run(double target, double velocity) {
+	void _run(double target, double velocity, SpringDescription? spring) {
 		trail.end();
 		// Springing back means the scratch never counted: heal rather than hold the holes.
 		if (target <= 0) {
@@ -136,7 +143,7 @@ class DisintegrationController extends ChangeNotifier {
 		final generation = ++_generation;
 		_anim.value = _progress;
 		_anim
-			.animateWith(SpringSimulation(_spring, _progress, target, velocity))
+			.animateWith(SpringSimulation(spring ?? _spring, _progress, target, velocity))
 			.whenComplete(() {
 				if (generation != _generation) return;
 				_progress = _target;

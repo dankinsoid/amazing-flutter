@@ -118,6 +118,10 @@ table and the inverse-mapping trap that shapes it are in `docs/disintegration.md
   3.47 throws. Bind a 1×1 blank image to unused samplers.
 - `macos/Runner/Info.plist` has `FLTEnableImpeller`; `flutter run` still needs
   `--enable-impeller` on 3.47 for the desktop target.
+- **Screenshots come from inside the app** (`example/lib/snap.dart`): a root
+  `RepaintBoundary` → `toImage` → PNG, with a `scheduleForcedFrame()` pump, because
+  an occluded macOS window gets no frames and `screencapture` returns a stale
+  composite. The sandbox only allows writes under the app container.
 - **macOS runs Skia by default in 3.38.** `flutter run` passes
   `enable-impeller=false` unless given `--enable-impeller`; the example sets
   `FLTEnableImpeller` in `macos/Runner/Info.plist` so the app itself defaults to
