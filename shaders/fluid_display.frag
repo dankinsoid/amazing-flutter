@@ -17,10 +17,9 @@ precision highp float;
 uniform vec2 uResolution;  // [0..1] canvas size, px
 uniform vec2 uTexel;       // [2..3] 1 / dye grid size
 uniform float uShading;    // [4] 0..1 mix of Dobryakov's fake relief
-uniform float uOpacity;    // [5] global fade as the effect ends
-uniform float uEdgeFade;   // [6] fade band at the canvas border, px
+uniform float uEdgeFade;   // [5] fade band at the canvas border, px
 
-// Total: 7 floats.
+// Total: 6 floats.
 
 uniform sampler2D uDye;  // sampler 0, premultiplied
 
@@ -59,5 +58,6 @@ void main() {
 	vec2 px = FlutterFragCoord().xy;
 	vec2 near = min(px, uResolution - px);
 	float edge = smoothstep(0.0, max(uEdgeFade, 1e-3), min(near.x, near.y));
-	fragColor = dye * (uOpacity * edge);
+	// The dye dies in the field, never by a layer fade; only the wall band is scaled.
+	fragColor = dye * edge;
 }

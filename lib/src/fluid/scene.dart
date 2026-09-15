@@ -89,8 +89,9 @@ class FluidSceneState extends State<FluidScene> with SingleTickerProviderStateMi
 
 	void _applyConfig() {
 		controller
-			..lifetime = widget.config.lifetime
-			..fadeOut = widget.config.fadeOut;
+			..settleDelay = widget.config.settleDelay
+			..settleRamp = widget.config.settleRamp
+			..settleDecay = widget.config.settleDecay;
 		_solver?.adopt(widget.config);
 	}
 
@@ -145,12 +146,13 @@ class FluidSceneState extends State<FluidScene> with SingleTickerProviderStateMi
 		solver
 			..adopt(widget.config)
 			..beginFrame();
-		// The clock runs in real time; only the sim is slowed by the cap.
-		final alive = controller.advance(raw.clamp(0.0, 0.1));
+		// Settling is a real-time process; only the sim is slowed by the cap.
+		final real = raw.clamp(1 / 1000, 0.1);
+		final alive = controller.advance(real);
 		for (final (at, delta) in controller.takeSplats()) {
 			solver.splat(at, delta);
 		}
-		solver.step(dt, controller.settle);
+		solver.step(dt, real, controller.settle);
 		controller
 			..passes = solver.passes
 			..liveImages = solver.liveImages;
@@ -209,7 +211,7 @@ class FluidSceneState extends State<FluidScene> with SingleTickerProviderStateMi
 							Positioned.fill(
 								child: IgnorePointer(
 									child: CustomPaint(
-										painter: _DyePainter(solver: solver, effect: controller, repaint: _repaint),
+										painter: _DyePainter(solver: solver, repaint: _repaint),
 									),
 								),
 							),
@@ -230,14 +232,12 @@ class _SceneScope extends InheritedWidget {
 }
 
 class _DyePainter extends CustomPainter {
-	_DyePainter({required this.solver, required this.effect, required Listenable repaint})
-		: super(repaint: repaint);
+	_DyePainter({required this.solver, required Listenable repaint}) : super(repaint: repaint);
 
 	final FluidSolver solver;
-	final FluidSceneController effect;
 
 	@override
-	void paint(Canvas canvas, Size size) => solver.paint(canvas, size, effect.opacity);
+	void paint(Canvas canvas, Size size) => solver.paint(canvas, size);
 
 	@override
 	bool shouldRepaint(_DyePainter old) => old.solver != solver;

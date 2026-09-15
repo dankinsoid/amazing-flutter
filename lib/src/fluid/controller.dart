@@ -1,5 +1,6 @@
 // @ai-generated(solo)
 
+import 'dart:math' as math;
 import 'dart:ui' show Offset;
 
 import 'package:flutter/foundation.dart';
@@ -45,14 +46,17 @@ class FluidSceneController extends ChangeNotifier {
 
 	FluidSceneStatus _status = FluidSceneStatus.idle;
 	double _settled = 0;
-	double _opacity = 1;
+	double _alpha = 1;
 	bool _frozen = false;
 
-	/// Seconds the scene keeps running after the last finger lifts; set from the config.
-	double lifetime = 3;
+	/// Seconds a stamp keeps its body before settling; set from the config.
+	double settleDelay = 0.4;
 
-	/// Seconds of global fade at the end of [lifetime].
-	double fadeOut = 1;
+	/// Seconds the settling ramps in over; set from the config.
+	double settleRamp = 0.5;
+
+	/// Dissipation applied everywhere once the dye settles, 1/s; set from the config.
+	double settleDecay = 1;
 
 	/// Passes the solver recorded in the last frame; reported by the scene.
 	int passes = 0;
@@ -63,32 +67,26 @@ class FluidSceneController extends ChangeNotifier {
 	FluidSceneStatus get status => _status;
 	bool get isActive => _status != FluidSceneStatus.idle;
 
-	/// Seconds since the last finger lifted; it does not run while one is down.
+	/// Seconds since the last stamp; a finger does not pause it, only [freeze] does.
 	double get settled => _settled;
 
-	/// Debug hold: the sim keeps stepping but the clock never reaches [lifetime].
+	/// Debug hold: the sim keeps stepping and the dye never runs out.
 	bool get isFrozen => _frozen;
 
-	/// The last-resort layer fade; the dye is already all but gone when it moves.
-	double get opacity => _opacity;
+	/// Upper bound on the dye's peak alpha; the effect ends when it is under 1/255.
+	double get alphaBound => _alpha;
 
-	/// Share of [fadeOut] over which [opacity] does the guaranteeing, once the
-	/// field's own dissipation has taken the dye down to a few per cent.
-	static const _guarantee = 0.3;
-
-	/// 0 while the dye must persist, 1 at the end of the tail; drives the dissipation.
+	/// 0 while a stamp keeps its body, 1 once it settles; smooth, never a step.
 	double get settle {
-		if (_status != FluidSceneStatus.settling || fadeOut <= 0) return 0;
-		final tail = lifetime - fadeOut;
-		if (_settled <= tail) return 0;
-		return ((_settled - tail) / fadeOut).clamp(0.0, 1.0);
+		if (settleRamp <= 0) return _settled >= settleDelay ? 1 : 0;
+		final t = ((_settled - settleDelay) / settleRamp).clamp(0.0, 1.0);
+		return t * t * (3 - 2 * t);
 	}
 
-	double get _targetOpacity => (1 - (settle - (1 - _guarantee)) / _guarantee).clamp(0.0, 1.0);
-
-	/// A fresh stamp restarts the clock; the new dye gets a full lifetime.
+	/// A fresh stamp restarts the clock; the new dye gets its own settle delay.
 	void wake() {
 		_settled = 0;
+		_alpha = 1;
 		if (_status == FluidSceneStatus.idle) _status = _touching ? FluidSceneStatus.touching : FluidSceneStatus.settling;
 		notifyListeners();
 	}
@@ -144,7 +142,7 @@ class FluidSceneController extends ChangeNotifier {
 		_strokes.clear();
 		_frozen = false;
 		_settled = 0;
-		_opacity = 1;
+		_alpha = 1;
 		_status = FluidSceneStatus.idle;
 		notifyListeners();
 	}
@@ -156,21 +154,21 @@ class FluidSceneController extends ChangeNotifier {
 		return taken;
 	}
 
-	/// Walks scripted strokes and ages the clock; false once the scene is over.
+	/// Walks scripted strokes and ages the dye; false once nothing visible is left.
+	///
+	/// A finger stirs the dye as it goes; it does not hold the dye alive. The bound
+	/// mirrors the two decays the shader applies everywhere and ignores the flow's
+	/// own, so the real dye is never above it.
 	bool advance(double dt) {
 		_stepStrokes(dt);
-		if (!_frozen && _status == FluidSceneStatus.settling) _settled += dt;
-		_slewOpacity(dt);
-		if (_frozen || _status != FluidSceneStatus.settling) return _status != FluidSceneStatus.idle;
-		if (_settled < lifetime) return true;
+		if (_frozen || _status == FluidSceneStatus.idle) return _status != FluidSceneStatus.idle;
+		_settled += dt;
+		final settled = settle;
+		// The shader takes whichever of the two decays is faster; so must the bound.
+		_alpha = math.min(_alpha / (1 + settleDecay * settled * dt), _alpha - settled / 255);
+		if (_alpha > 1 / 255) return true;
 		reset();
 		return false;
-	}
-
-	// The fade's own slope is the limit, so fading is exact and recovery mirrors it.
-	void _slewOpacity(double dt) {
-		final step = fadeOut > 0 ? dt / (fadeOut * _guarantee) : 1.0;
-		_opacity = (_opacity + (_targetOpacity - _opacity).clamp(-step, step)).clamp(0.0, 1.0);
 	}
 
 	void _stepStrokes(double dt) {

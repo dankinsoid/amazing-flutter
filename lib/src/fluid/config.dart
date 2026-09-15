@@ -17,13 +17,13 @@ final class FluidConfig {
 		this.densityDissipation = 1.1,
 		this.velocityDissipation = 0.2,
 		this.dissipationSpeed = 200,
-		this.greying = 0.35,
+		this.greyRate = 10,
+		this.settleDelay = 0.4,
+		this.settleRamp = 0.5,
+		this.settleDecay = 1,
 		this.splatRadius = 20,
 		this.splatForce = 10,
 		this.shading = 0,
-		this.lifetime = 3,
-		this.fadeOut = 1,
-		this.fadeDecay = 12,
 		this.edgeFade = 40,
 		this.velocityRange = 512,
 		this.curlRange = 256,
@@ -47,17 +47,26 @@ final class FluidConfig {
 	/// Vorticity confinement strength.
 	final double curl;
 
-	/// Dye lost per second where the flow is at [dissipationSpeed] or faster.
+	/// Extra dye lost per second where the flow is at [dissipationSpeed] or faster.
 	final double densityDissipation;
 
 	/// Velocity lost per second; the solver's stand-in for viscosity.
 	final double velocityDissipation;
 
-	/// Flow speed of full dye decay, logical px/s; still dye never fades.
+	/// Flow speed of full local dye decay, logical px/s; still dye only settles.
 	final double dissipationSpeed;
 
-	/// How far decaying dye is pulled to its own luminance, 0..1; 0 keeps the colour.
-	final double greying;
+	/// Rate the settling dye is pulled to its own luminance, 1/s; 0 keeps the colour.
+	final double greyRate;
+
+	/// Seconds a stamp keeps its body before the dye starts settling everywhere.
+	final double settleDelay;
+
+	/// Seconds the settling ramps in over; a step would read as the layer cutting out.
+	final double settleRamp;
+
+	/// Dissipation applied everywhere once the dye settles, 1/s; what ends the effect.
+	final double settleDecay;
 
 	/// Radius where a splat's velocity falls to 1/e, logical px.
 	final double splatRadius;
@@ -67,15 +76,6 @@ final class FluidConfig {
 
 	/// Mix of Dobryakov's fake relief; above 0 a dye border picks up a rim.
 	final double shading;
-
-	/// Seconds the scene keeps running after the last finger lifts.
-	final double lifetime;
-
-	/// Seconds of global fade at the end of [lifetime].
-	final double fadeOut;
-
-	/// Dissipation added everywhere at the end of [fadeOut], 1/s; what ends the dye.
-	final double fadeDecay;
 
 	/// Fade band at the scene border, logical px; the walls trap dye there.
 	final double edgeFade;
@@ -95,17 +95,23 @@ final class FluidConfig {
 	/// Above 0.5 the sim fields use rgbaFloat32 targets and no packing at all.
 	final double floatFields;
 
-	/// Thins fast and rolls hard; a card is gone within its lifetime.
-	static const smoke = FluidConfig(densityDissipation: 1.6, curl: 36, dissipationSpeed: 160, greying: 0.6);
+	/// Thins fast and rolls hard; a card is grey within a second of settling.
+	static const smoke = FluidConfig(
+		densityDissipation: 1.6,
+		curl: 36,
+		dissipationSpeed: 160,
+		greyRate: 8,
+		settleDecay: 1.6,
+	);
 
-	/// Keeps its colour: slow decay, low drag, long filaments.
+	/// Keeps its colour to the end: slow decay, low drag, long filaments.
 	static const ink = FluidConfig(
 		densityDissipation: 0.45,
 		curl: 44,
 		velocityDissipation: 0.1,
 		dissipationSpeed: 280,
-		greying: 0,
-		lifetime: 4,
+		greyRate: 0,
+		settleDecay: 0.8,
 	);
 
 	/// Viscous: motion dies quickly, so the card sags rather than explodes.
@@ -114,9 +120,10 @@ final class FluidConfig {
 		curl: 5,
 		velocityDissipation: 2.2,
 		dissipationSpeed: 110,
-		greying: 0.2,
+		greyRate: 3,
+		settleDelay: 0.7,
+		settleDecay: 0.9,
 		splatForce: 7,
-		lifetime: 3.5,
 	);
 
 	static FluidConfig of(FluidPreset preset) => switch (preset) {
@@ -134,13 +141,13 @@ final class FluidConfig {
 		double? densityDissipation,
 		double? velocityDissipation,
 		double? dissipationSpeed,
-		double? greying,
+		double? greyRate,
+		double? settleDelay,
+		double? settleRamp,
+		double? settleDecay,
 		double? splatRadius,
 		double? splatForce,
 		double? shading,
-		double? lifetime,
-		double? fadeOut,
-		double? fadeDecay,
 		double? edgeFade,
 		double? velocityRange,
 		double? curlRange,
@@ -156,13 +163,13 @@ final class FluidConfig {
 		densityDissipation: densityDissipation ?? this.densityDissipation,
 		velocityDissipation: velocityDissipation ?? this.velocityDissipation,
 		dissipationSpeed: dissipationSpeed ?? this.dissipationSpeed,
-		greying: greying ?? this.greying,
+		greyRate: greyRate ?? this.greyRate,
+		settleDelay: settleDelay ?? this.settleDelay,
+		settleRamp: settleRamp ?? this.settleRamp,
+		settleDecay: settleDecay ?? this.settleDecay,
 		splatRadius: splatRadius ?? this.splatRadius,
 		splatForce: splatForce ?? this.splatForce,
 		shading: shading ?? this.shading,
-		lifetime: lifetime ?? this.lifetime,
-		fadeOut: fadeOut ?? this.fadeOut,
-		fadeDecay: fadeDecay ?? this.fadeDecay,
 		edgeFade: edgeFade ?? this.edgeFade,
 		velocityRange: velocityRange ?? this.velocityRange,
 		curlRange: curlRange ?? this.curlRange,
@@ -186,13 +193,13 @@ final class FluidConfig {
 		densityDissipation,
 		velocityDissipation,
 		dissipationSpeed,
-		greying,
+		greyRate,
+		settleDelay,
+		settleRamp,
+		settleDecay,
 		splatRadius,
 		splatForce,
 		shading,
-		lifetime,
-		fadeOut,
-		fadeDecay,
 		edgeFade,
 		velocityRange,
 		curlRange,

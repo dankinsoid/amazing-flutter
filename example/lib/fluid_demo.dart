@@ -15,6 +15,8 @@ import 'snap.dart';
 const _debugStroke = false;
 // Seconds from launch at which that stroke starts; the programs must resolve first.
 const _debugStrokeAt = 0.8;
+// Seconds the debug stroke takes; 0.25 is about 760 px/s, 0.63 about 300 px/s.
+const _debugStrokeSeconds = 0.25;
 // Seconds at which a second stroke crosses the flow of the first; < 0 skips it.
 const _debugSecondStroke = -1.0;
 // Seconds at which a stroke carries the left card's dye across its neighbour; < 0 skips it.
@@ -36,6 +38,9 @@ const _debugDecaySpeed = -1.0;
 // Same content and a flat backdrop on every card, so their dye must come out
 // byte-identical; the sim-grid determinism check.
 const _debugIdenticalCards = false;
+// Hides the cards so a snap captures the bare backdrop, the reference an alpha
+// measurement needs.
+const _debugBackdrop = false;
 
 /// label, sim resolution, pressure iterations, dye cap, float fields.
 const _profileRuns = <(String, double, double, double, double)>[
@@ -119,7 +124,9 @@ class _FluidDemoState extends State<FluidDemo> {
 				}
 			});
 		}
-		if (_debugStroke) _at(_debugStrokeAt, () => _cardStroke(const Offset(18, 24), const Offset(132, 176), 0.25));
+		if (_debugStroke) {
+			_at(_debugStrokeAt, () => _cardStroke(const Offset(18, 24), const Offset(132, 176), _debugStrokeSeconds));
+		}
 		if (_debugSecondStroke >= 0) {
 			_at(_debugSecondStroke, () => _cardStroke(const Offset(-40, 110), const Offset(190, 96), 0.1));
 		}
@@ -249,7 +256,6 @@ class _FluidDemoState extends State<FluidDemo> {
 					pressureIterations: iterations > 0 ? iterations : _config.pressureIterations,
 					dyeResolution: dye,
 					floatFields: floats,
-					lifetime: 30,
 				);
 			});
 			await Future<void>.delayed(const Duration(milliseconds: 200));
@@ -257,6 +263,8 @@ class _FluidDemoState extends State<FluidDemo> {
 				for (final effect in _effects) {
 					effect.stamp();
 				}
+				// The clock no longer waits for a finger, so park it or the run ends mid-measure.
+				_scene.freeze(0);
 				await Future<void>.delayed(const Duration(milliseconds: 100));
 				_stir();
 			} else {
@@ -363,7 +371,13 @@ class _FluidDemoState extends State<FluidDemo> {
 									Fluid(
 										key: _cardKeys[i],
 										controller: _effects[i],
-										child: _Card(card: _cards[_debugIdenticalCards ? 0 : i]),
+										child: Visibility(
+											visible: !_debugBackdrop,
+											maintainSize: true,
+											maintainAnimation: true,
+											maintainState: true,
+											child: _Card(card: _cards[_debugIdenticalCards ? 0 : i]),
+										),
 									),
 							],
 						),
@@ -382,14 +396,14 @@ class _FluidDemoState extends State<FluidDemo> {
 			('curl', 0, 60, _config.curl, (v) => _config.copyWith(curl: v)),
 			('dye decay', 0, 4, _config.densityDissipation, (v) => _config.copyWith(densityDissipation: v)),
 			('decay speed', 10, 800, _config.dissipationSpeed, (v) => _config.copyWith(dissipationSpeed: v)),
-			('greying', 0, 1, _config.greying, (v) => _config.copyWith(greying: v)),
+			('grey rate', 0, 20, _config.greyRate, (v) => _config.copyWith(greyRate: v)),
 			('vel decay', 0, 4, _config.velocityDissipation, (v) => _config.copyWith(velocityDissipation: v)),
 			('splat radius', 4, 120, _config.splatRadius, (v) => _config.copyWith(splatRadius: v)),
 			('splat force', 1, 40, _config.splatForce, (v) => _config.copyWith(splatForce: v)),
 			('shading', 0, 1, _config.shading, (v) => _config.copyWith(shading: v)),
-			('lifetime', 0.5, 10, _config.lifetime, (v) => _config.copyWith(lifetime: v)),
-			('fade out', 0, 4, _config.fadeOut, (v) => _config.copyWith(fadeOut: v)),
-			('fade decay', 0, 40, _config.fadeDecay, (v) => _config.copyWith(fadeDecay: v)),
+			('settle delay', 0, 3, _config.settleDelay, (v) => _config.copyWith(settleDelay: v)),
+			('settle ramp', 0.05, 2, _config.settleRamp, (v) => _config.copyWith(settleRamp: v)),
+			('settle decay', 0.3, 6, _config.settleDecay, (v) => _config.copyWith(settleDecay: v)),
 			('edge fade', 0, 120, _config.edgeFade, (v) => _config.copyWith(edgeFade: v)),
 			('vel range', 32, 2048, _config.velocityRange, (v) => _config.copyWith(velocityRange: v)),
 			('curl range', 16, 2048, _config.curlRange, (v) => _config.copyWith(curlRange: v)),

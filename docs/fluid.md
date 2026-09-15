@@ -85,12 +85,12 @@ the delta in texels there is no anisotropy left to correct.
 The spike's 1200-per-uv over its 330 × 380 canvas at sim 128 works out to 9.4;
 the default is **10**.
 
-## 3. Local dissipation: the card is solid until it flows
+## 3. Local dissipation, and the ending
 
-Dobryakov's `DENSITY_DISSIPATION` is global, so the whole card starts fading the
-instant the effect begins, even the parts the finger never reached. The card
-does not flow away, it *washes out* — which is the one thing a widget-as-dye must
-not do, because the widget is supposed to look untouched until it is touched.
+Dobryakov's `DENSITY_DISSIPATION` is global from frame one, so the whole card
+starts fading the instant the effect begins, even the parts the finger never
+reached. The card does not flow away, it *washes out* — which is the one thing a
+widget-as-dye must not do while the finger is still on it.
 
 The dye decay is therefore gated on the local flow speed, in the advection pass:
 
@@ -122,43 +122,88 @@ the design has to change to add it.
 
 A layer opacity ramped to zero is a crossfade: the colours stay what they were
 and the whole thing turns see-through at once. Smoke does not do that — it goes
-pale and grey as it thins. So the end of life happens **inside the dye**:
+pale and grey as it thins. **There is no opacity multiplier anywhere**; the dye
+dies in the field, and the display pass only scales the wall band.
 
-- `uSettle` adds dissipation everywhere, ramped from 0 to `fadeDecay` over the
-  `fadeOut` tail. It is the same exponential decay the flow already applies,
-  just no longer gated on speed, so the dye thins where it stands.
-- `uGrey` pulls decaying dye toward its own luminance, in proportion to how much
-  decay is being applied that frame: `grey = greying * rate * dt`. Dye that is
-  not decaying does not shift at all, so a solid card keeps its colour exactly,
-  and a plume greys as it thins. In premultiplied space the luma dot product is
-  the grey of the same alpha, so the result stays a valid premultiplied colour.
+The end is three terms in the advection pass, all driven by one `settle` ramp:
 
-The display's `opacity` remains, but only over the last 30 % of `fadeOut` and
-only as the guarantee that the effect *ends*. By the time it starts moving, the
-field is down to a few per cent (measured: the dye is visually gone at
-settle 0.75, where the opacity multiplier is still 0.83), so in the normal case
-it is invisible. The clock does not run while a finger is down, so neither the
-settle dissipation nor the opacity can start mid-stroke.
+```
+settle  = smoothstep over [settleDelay, settleDelay + settleRamp] since the stamp
+uSettle = settle * settleDecay        dissipation everywhere, 1/s
+uGrey   = settle * greyRate           colour pulled to its own luminance, 1/s
+uFloor  = settle / 255                a level of dye per frame, at least
+```
 
-## 4. Lifetime, stirring, and taps
+Four things make this behave:
 
-The scene's clock is a settle clock, not a countdown from the first touch:
+- **It starts from the stamp, not from a release, and nothing pauses it.** The
+  velocity-gated local decay above only shapes *how* a card goes, never whether:
+  a slow finger produces little `|v|`, so with only the local term a card sits
+  there at full strength until something else removes it — which is what made the
+  first version read as a step when the tail finally arrived. Cards that were
+  never stamped are not in the dye at all and are untouched either way.
+- **The ramp is a `smoothstep`, never a step.** `settleDelay` 0.4 s of untouched
+  body, then `settleRamp` 0.5 s of easing in.
+- **Colour leads, body follows.** `greyRate` is ten times `settleDecay`, so the
+  dye is neutral while it is still half opaque: the card visibly drains to grey
+  smoke, and only then does the smoke thin away (measured in §9).
+- **Settling is real time, not frames.** `dt` is capped at 1/60 for advection
+  stability, so a frame-driven decay would dissolve a card in frames rather than
+  seconds on a slow device. The settling rates are scaled by `realDt / dt` to
+  undo the cap; advection keeps the capped step.
 
-- It **pauses** while any pointer is down or a scripted stroke is running, and
-  resumes on release. Stirring never runs out under your finger.
-- A **new stamp restarts it**. Dye that has just entered the field gets a full
-  lifetime; stirring dye that is already there does not buy more.
+**The 8-bit floor.** The dye is RGBA8, and `v / (1 + rate·dt)` stops changing the
+stored byte once the step falls under half a level — at 60 fps and a rate of 1
+that is everything under 60/255, so without help the dye freezes at a quarter
+opacity forever. Measured: it stalled at 14/255 and stayed there for as long as
+the scene ran. `uFloor` fixes it by taking whichever of the two decays is faster,
+
+```glsl
+dye = max(min(source / decay, source - uFloor), 0.0);
+```
+
+so healthy dye follows the exponential unchanged — its multiplicative step is
+already bigger than a level — and stalled dye loses a level a frame until it is
+gone. The cost is that the last fifth of the fade runs on frames rather than
+seconds, so its duration varies with the frame rate. It is also the part that is
+nearly invisible.
+
+**Termination is a bound, not a clock.** `FluidSceneController` mirrors the two
+global decays in Dart, starting from 1 at each stamp:
+
+```dart
+_alpha = math.min(_alpha / (1 + settleDecay * settled * dt), _alpha - settled / 255);
+```
+
+Same `min`, same rates, same real `dt`, and it ignores the local flow decay, which
+only ever removes more — so `_alpha` is a true upper bound on the dye's peak
+alpha. The scene finishes the frame it drops under 1/255, with nothing visible
+left to cut. There is no `lifetime` knob: the duration falls out of
+`settleDelay`, `settleRamp` and `settleDecay`, and runs about 2.5 s from stamp to
+gone at the defaults.
+
+## 4. Stirring, and taps
+
+The dye starts dying `settleDelay` after the stamp and keeps dying whatever the
+finger does. A finger **stirs what is disappearing**; it does not hold it alive.
+That is deliberate: a clock that pauses under the finger lets a card be kept
+whole indefinitely by resting a thumb on it, and it was also what let the ending
+arrive as a surprise rather than as something already under way.
+
+- A **new stamp** restarts the clock and the alpha bound, so dye that has just
+  entered the field gets its own untouched body.
 - A pointer landing on a card that is already dye only **stirs** — the stamp
   happens once, on the down that hides the child.
 
 A tap is not free: `Fluid` stamps on pointer down, so even a tap turns the card
-into dye and starts the lifetime, with almost no velocity in the field — the card
-sits still and then fades out over `fadeOut`. There is deliberately **no spring-back**.
-Disintegration can heal a scratch because its progress is a scalar it can drive
-back to zero; a fluid has no such handle — the dye has already been composited
-into a shared field and mixed with whatever else is in it, and there is nothing
-to run backwards. If a tap must not destroy a card, gate it in the app: pass
-`enabled: false` and call `controller.stamp()` from a real drag recognizer.
+into dye and starts it settling, with almost no velocity in the field — the card
+sits still, drains to grey and thins away. There is deliberately **no
+spring-back**. Disintegration can heal a scratch because its progress is a scalar
+it can drive back to zero; a fluid has no such handle — the dye has already been
+composited into a shared field and mixed with whatever else is in it, and there
+is nothing to run backwards. If a tap must not destroy a card, gate it in the
+app: pass `enabled: false` and call `controller.stamp()` from a real drag
+recognizer.
 
 ## 5. Storage: RGBA8 packing, and float32
 
@@ -358,6 +403,42 @@ An earlier run of this test reported 0 / 255. That run was wrong: it predated th
 `canStamp` fix, so the stamp was silently refused and both frames were the live
 card. A zero here means nothing unless the diff is non-zero *somewhere*.
 
+### The ending, measured
+
+Two runs of the same diagonal stroke at different speeds — **300 px/s** (0.63 s,
+a real finger) and **760 px/s** (0.25 s) — frames every 0.25 s, with a bare
+backdrop captured separately as the reference. Greying mixes toward
+`vec3(dot(rgb, W))`, which preserves luminance exactly, so alpha comes from
+luminance and saturation from the reconstructed dye colour `d / alpha + bg`.
+
+| t (s) | alpha, slow | saturation, slow | alpha, fast | saturation, fast | escaped dye, slow |
+|---|---|---|---|---|---|
+| 0.50 | 1.000 | 198 | 1.000 | 198 | 0.00 |
+| 1.00 | 0.946 | 194 | 0.910 | 192 | 0.64 |
+| 1.25 | 0.786 | 126 | 0.791 | 137 | 1.82 |
+| 1.50 | 0.509 | **20** | 0.510 | **23** | 1.66 |
+| 1.75 | 0.250 | 10 | 0.263 | 10 | 0.97 |
+| 2.00 | 0.112 | — | 0.130 | — | 0.26 |
+| 2.25 | 0.035 | — | 0.044 | — | 0.00 |
+| 2.50 | 0.004 | — | 0.008 | — | 0.00 |
+| 2.75 | 0.000 | — | 0.000 | — | 0.00 |
+
+Saturation is meaningless below about alpha 0.05 — dividing the dye by a vanishing
+alpha amplifies whatever is left — so those cells are left out rather than quoted.
+
+What the columns say:
+
+- **Both alpha curves are smooth and monotonic**, with no step anywhere, and the
+  slow and fast strokes produce the *same* ending to within a percent. The tail
+  no longer depends on how fast the finger moved, which was the whole point.
+- **Saturation reaches near zero at alpha 0.5**, half a second before the body
+  goes: 198 → 20 while the dye is still half opaque. That is the grey-smoke phase,
+  and it is visible in the frames, not just in the table.
+- **The escaped dye outside the card rects** rises to a peak as the plumes leave
+  and falls back to zero on the same schedule, so nothing is left hanging.
+- The last measurable frame sits at 0.004 (about 1/255) before the scene finishes,
+  so there is nothing left to cut when it does.
+
 ### What the frames show
 
 Captured from inside the app (`example/lib/snap.dart`) with synthetic strokes
@@ -375,15 +456,10 @@ card-local (18, 24) to (132, 176) over 0.25 s starting at t = 0.8 s.
   own footprint, and the card bodies are still saturated. Median brightness inside
   the original card rect is 191 / 177 / 214 against 214 / 199 / 251 for the live
   card: down 11–15 %, all of it displacement rather than fade.
-- **2.5 s** — the plumes have thinned, desaturated into grey smoke and spread
-  across the lower half of the scene, one card's dye reaching into its
-  neighbour's column; the card cores still hold their colour. Mean saturation
-  over the dye falls from 103 at 1.0 s to 39 here, against 111 → 65 with
-  `greying: 0`.
-- **The tail** — at settle 0.5 the smoke is faint grey ghosts of the cards, at
-  0.75 it is gone, and the effect ends at 1.0. The card-rect median brightness
-  runs 188 → 83 → 61 → 56 against a background of about 45. The layer opacity is
-  still 0.83 when there is nothing left to fade.
+- **0.7 s after the stamp** — the cards have drained to neutral grey smoke at
+  about half opacity, structure and titles still readable: the grey-smoke phase.
+- **1.2 s after the stamp** — grey vortex curls, no colour anywhere, thinning
+  away. A quarter of a second later there is nothing left.
 - **1.5 s after a second fast stroke through the flow** — textbook
   Kelvin-Helmholtz mushrooms and shear curls, and the colours have **mixed**:
   magenta runs into the cyan region, cyan under the orange, the yellow carried to
@@ -455,8 +531,11 @@ Fluid(                            // a source of dye inside that scene
 )
 ```
 
-`FluidConfig.greying` sets how far decaying dye desaturates (0 in the `ink`
-preset, 0.6 in `smoke`); `fadeDecay` is the dissipation the tail ramps up to.
+The ending's knobs are `settleDelay`, `settleRamp`, `settleDecay` and `greyRate`
+(0 in the `ink` preset, which keeps its colour to the end). There is no
+`lifetime` and no `fadeOut`: the scene ends when its alpha bound drops under
+1/255, so the duration is a consequence of the decay rather than a second number
+that has to agree with it.
 
 `FluidSceneController` carries the clock (`settled`, `opacity`, `freeze`,
 `resume`, `reset`), the pointer funnel (`down`/`moveTo`/`up`), scripted strokes
@@ -485,6 +564,10 @@ one restarts the scene rather than corrupting the buffers.
   has its own block; `_U` in `solver.dart` mirrors all eight.
 - `FragmentProgram.fromAsset` paths are
   `packages/amazing_flutter/shaders/<name>.frag`.
+- **An 8-bit field cannot decay to zero multiplicatively.** `v / (1 + rate·dt)`
+  rounds back to `v` once the step is under half a level, so the dye freezes at a
+  visible opacity and never finishes. Whatever kills a quantised field has to
+  include a term that is absolute, not proportional (§3).
 - **The scene stirs through a `Listener`, not the gesture arena.** That is what
   lets a stroke start on a card, leave it, and keep stirring, and it means the
   scene never competes for a gesture. The cost is that a drag which *is* a

@@ -23,10 +23,11 @@ uniform float uVector;       // [8] 1 advects packed velocity, 0 advects premult
 uniform vec2 uVelCode;       // [9..10] velocity store: value * x + y
 uniform vec2 uSourceCode;    // [11..12] advected field store; identity for the dye
 uniform float uSpeedRef;     // [13] speed of full decay, grid texels/s; 0 decays everywhere
-uniform float uSettle;       // [14] decay added everywhere as the effect ends, 1/s
-uniform float uGrey;         // [15] how far decaying dye is pulled to its own luminance
+uniform float uSettle;       // [14] decay added everywhere once the dye settles, 1/s
+uniform float uGrey;         // [15] rate the dye is pulled to its own luminance, 1/s
+uniform float uFloor;        // [16] dye removed per frame while settling, 0..1 scale
 
-// Total: 16 floats.
+// Total: 17 floats.
 
 uniform sampler2D uVelocity;  // sampler 0
 uniform sampler2D uSource;    // sampler 1
@@ -80,8 +81,12 @@ void main() {
 	}
 	// Premultiplied dye: dividing all four channels thins the smoke without tinting it.
 	vec4 dye = source / decay;
-	// Dye that loses body loses colour, or the end reads as a layer going transparent.
-	float grey = clamp(uGrey * rate * uDt, 0.0, 1.0);
+	// An 8-bit dye stops changing once the step is under half a level, so a settling
+	// one takes at least a level a frame; healthy dye is already past that.
+	dye = max(min(dye, source - vec4(uFloor)), vec4(0.0));
+	// Colour drains faster than body, so the card ends as grey smoke and not as a
+	// coloured layer going transparent.
+	float grey = clamp(uGrey * uDt, 0.0, 1.0);
 	dye.rgb = mix(dye.rgb, vec3(dot(dye.rgb, vec3(0.2126, 0.7152, 0.0722))), grey);
 	fragColor = dye;
 }
