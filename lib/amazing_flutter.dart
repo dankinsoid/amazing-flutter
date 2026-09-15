@@ -1,6 +1,10 @@
+export 'src/disintegration/config.dart';
+export 'src/disintegration/controller.dart';
+export 'src/disintegration/disintegrate.dart';
 export 'src/elastic/elastic_body.dart';
 export 'src/liquid_glass/liquid_glass.dart';
 export 'src/liquid_glass/material.dart';
 export 'src/liquid_glass/ripples.dart';
 export 'src/liquid_glass/shapes.dart';
 export 'src/liquid_glass/touch.dart';
+export 'src/snapshot/snapshot.dart';

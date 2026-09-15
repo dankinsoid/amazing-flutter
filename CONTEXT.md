@@ -94,6 +94,16 @@ proves the architecture), liquid metal (reflect a matcap instead of refracting),
 rubber-band pull, disintegration (one shader, three modes: Thanos / smoke /
 blow-away), genie, god rays behind live text input, caustics.
 
+**Done out of order: disintegration, and with it the snapshot primitive.**
+`lib/src/snapshot/` is now the second row of the table above: `SnapshotHost` wraps
+a child in a `RepaintBoundary`, freezes it with `toImageSync` on gesture start —
+before the child is hidden, since the boundary must have painted — and hands a
+`ChildSnapshotPainter` a canvas grown by a `spread` margin so an effect can throw
+pixels past the child. It knows nothing about disintegration, so fold, genie and
+page curl should build on it rather than re-capture. The effect itself is
+`shaders/disintegration.frag` plus `lib/src/disintegration/`; design, uniform
+table and the inverse-mapping trap that shapes it are in `docs/disintegration.md`.
+
 ## Environment
 
 - Local toolchain: **Flutter 3.47.4 stable**, Dart 3.13.3, macOS arm64 (upgraded from 3.38.9 on 2026-09-14 for #170820).
