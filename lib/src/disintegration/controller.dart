@@ -3,8 +3,10 @@
 import 'package:flutter/animation.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/physics.dart';
+import 'package:flutter/scheduler.dart';
 
 import 'config.dart';
+import 'trail.dart';
 
 enum DisintegrationStatus { idle, dragging, settling, dismissed }
 
@@ -14,13 +16,20 @@ class DisintegrationController extends ChangeNotifier {
 		required TickerProvider vsync,
 		DisintegrationMode mode = DisintegrationMode.shards,
 		SpringDescription? spring,
+		ErodeTrail? trail,
 	}) : _mode = mode,
-		 _spring = spring ?? SpringDescription.withDampingRatio(mass: 1, stiffness: 260, ratio: 1) {
+		 _spring = spring ?? SpringDescription.withDampingRatio(mass: 1, stiffness: 260, ratio: 1),
+		 trail = trail ?? ErodeTrail() {
 		_anim = AnimationController.unbounded(vsync: vsync)..addListener(_tick);
+		_trailTicker = vsync.createTicker(_ageTrail);
 	}
+
+	/// The destroying stroke of erode mode, in the child's own coordinates.
+	final ErodeTrail trail;
 
 	final SpringDescription _spring;
 	late final AnimationController _anim;
+	late final Ticker _trailTicker;
 
 	DisintegrationMode _mode;
 	double _progress = 0;
@@ -38,7 +47,7 @@ class DisintegrationController extends ChangeNotifier {
 	Offset? get origin => _origin;
 
 	DisintegrationStatus get status => _status;
-	bool get isActive => _status != DisintegrationStatus.idle || _progress > 0;
+	bool get isActive => _status != DisintegrationStatus.idle || _progress > 0 || !trail.isEmpty;
 
 	set mode(DisintegrationMode value) {
 		if (value == _mode) return;
@@ -57,6 +66,20 @@ class DisintegrationController extends ChangeNotifier {
 		_origin = origin;
 		_progress = 0;
 		_status = DisintegrationStatus.dragging;
+		if (_mode == DisintegrationMode.erode) {
+			trail.start(origin);
+			_trailTicker.start();
+		}
+		notifyListeners();
+	}
+
+	/// Feeds the destroying stroke; erode mode only, and it leaves [progress] alone.
+	void erode(Offset at) {
+		trail.drag(at);
+		final direction = trail.points.isEmpty ? Offset.zero : trail.points.last.direction;
+		if (direction != Offset.zero) _direction = direction;
+		_status = DisintegrationStatus.dragging;
+		if (!_trailTicker.isActive) _trailTicker.start();
 		notifyListeners();
 	}
 
@@ -93,13 +116,21 @@ class DisintegrationController extends ChangeNotifier {
 
 	void reset() {
 		_anim.stop();
+		_trailTicker.stop();
 		_generation++;
+		trail.clear();
 		_progress = 0;
 		_status = DisintegrationStatus.idle;
 		notifyListeners();
 	}
 
 	void _run(double target, double velocity) {
+		trail.end();
+		// Springing back means the scratch never counted: heal rather than hold the holes.
+		if (target <= 0) {
+			trail.clear();
+			_trailTicker.stop();
+		}
 		_target = target;
 		_status = DisintegrationStatus.settling;
 		final generation = ++_generation;
@@ -120,6 +151,15 @@ class DisintegrationController extends ChangeNotifier {
 		notifyListeners();
 	}
 
+	// A still finger emits no points, but its hole must keep widening.
+	void _ageTrail(Duration _) {
+		if (trail.isEmpty || _status == DisintegrationStatus.dismissed) {
+			_trailTicker.stop();
+			return;
+		}
+		notifyListeners();
+	}
+
 	static Offset _unit(Offset v) {
 		final d = v.distance;
 		return d > 1e-3 ? v / d : const Offset(1, 0);
@@ -127,6 +167,7 @@ class DisintegrationController extends ChangeNotifier {
 
 	@override
 	void dispose() {
+		_trailTicker.dispose();
 		_anim.dispose();
 		super.dispose();
 	}

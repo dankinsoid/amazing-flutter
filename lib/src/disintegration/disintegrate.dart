@@ -15,6 +15,8 @@ abstract final class _U {
 	static const cellSize = 13, drift = 14, lift = 15, jitter = 16, spin = 17, shrink = 18;
 	static const noiseScale = 19, turbulence = 20, radial = 21;
 	static const softness = 22, sweep = 23, blur = 24, fade = 25, edgeFade = 26;
+	static const erodeRadius = 27, erodeGrowth = 28, erodeDrag = 29, erodeSwirl = 30, erodeVortex = 31;
+	static const trail = 32, trailDir = 160, trailStride = 4, maxTrail = 32;
 }
 
 /// Dissolves [child] on a swipe: shards, smoke, or blown out of the finger.
@@ -57,6 +59,7 @@ class _DisintegrateState extends State<Disintegrate> with SingleTickerProviderSt
 	@override
 	void initState() {
 		super.initState();
+		_effect.trail.spacing = widget.config.trailSpacing;
 		_effect.addListener(_onEffect);
 		_program ??= ui.FragmentProgram.fromAsset('packages/amazing_flutter/shaders/disintegration.frag');
 		_program!.then((program) {
@@ -68,6 +71,7 @@ class _DisintegrateState extends State<Disintegrate> with SingleTickerProviderSt
 	@override
 	void didUpdateWidget(Disintegrate oldWidget) {
 		super.didUpdateWidget(oldWidget);
+		_effect.trail.spacing = widget.config.trailSpacing;
 		if (oldWidget.controller != widget.controller) {
 			(oldWidget.controller ?? _private)?.removeListener(_onEffect);
 			_effect.addListener(_onEffect);
@@ -97,11 +101,16 @@ class _DisintegrateState extends State<Disintegrate> with SingleTickerProviderSt
 
 	void _onStart(DragStartDetails details) {
 		_travel = Offset.zero;
+		_effect.trail.spacing = widget.config.trailSpacing;
 		_effect.beginDrag(details.localPosition);
 	}
 
 	void _onUpdate(DragUpdateDetails details) {
 		_travel += details.delta;
+		if (_effect.mode == DisintegrationMode.erode) {
+			_effect.erode(details.localPosition);
+			return;
+		}
 		_effect.drag(
 			direction: _travel,
 			progress: _travel.distance / widget.config.dismissDistance,
@@ -112,6 +121,14 @@ class _DisintegrateState extends State<Disintegrate> with SingleTickerProviderSt
 		final direction = _effect.direction;
 		final velocity = details.velocity.pixelsPerSecond;
 		final along = velocity.dx * direction.dx + velocity.dy * direction.dy;
+		if (_effect.mode == DisintegrationMode.erode) {
+			// Any real stroke destroys the widget; only a tap-length scratch heals.
+			_effect.settle(
+				dismiss: _effect.trail.length > widget.config.dismissDistance * 0.25,
+				velocity: velocity.distance / widget.config.dismissDistance,
+			);
+			return;
+		}
 		_effect.settle(
 			dismiss: along > widget.config.flingVelocity || _effect.progress >= 0.6,
 			velocity: along / widget.config.dismissDistance,
@@ -209,7 +226,37 @@ class _DisintegrationPainter extends ChildSnapshotPainter {
 			..setFloat(_U.blur, config.blur)
 			..setFloat(_U.fade, config.fade)
 			..setFloat(_U.edgeFade, config.edgeFade)
-			..setImageSampler(0, snapshot);
+			..setFloat(_U.erodeRadius, config.erodeRadius)
+			..setFloat(_U.erodeGrowth, config.erodeGrowth)
+			..setFloat(_U.erodeDrag, config.erodeDrag)
+			..setFloat(_U.erodeSwirl, config.erodeSwirl)
+			..setFloat(_U.erodeVortex, config.erodeVortex);
+		if (effect.mode == DisintegrationMode.erode) _writeTrail(shader, rect);
+		shader.setImageSampler(0, snapshot);
+	}
+
+	/// Other modes never read the trail block, so it is only uploaded for erode.
+	void _writeTrail(ui.FragmentShader shader, Rect rect) {
+		final points = effect.trail.points;
+		final now = DateTime.now();
+		for (var i = 0; i < _U.maxTrail; i++) {
+			final slot = _U.trail + i * _U.trailStride;
+			if (i >= points.length) {
+				// Strength 0 marks the slot empty; the shader reads nothing else from it.
+				shader.setFloat(slot + 3, 0);
+				continue;
+			}
+			final point = points[i];
+			final at = rect.topLeft + point.position;
+			final direction = _U.trailDir + i * _U.trailStride;
+			shader
+				..setFloat(slot, at.dx)
+				..setFloat(slot + 1, at.dy)
+				..setFloat(slot + 2, point.ageAt(now))
+				..setFloat(slot + 3, point.strength)
+				..setFloat(direction, point.direction.dx)
+				..setFloat(direction + 1, point.direction.dy);
+		}
 	}
 
 	@override

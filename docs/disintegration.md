@@ -7,13 +7,14 @@ Settled decisions it builds on are in `CONTEXT.md` (3: one fat shader,
 
 ## 1. Scope
 
-A widget dissolves on a swipe, in three modes from one `.frag`:
+A widget dissolves on a swipe, in four modes from one `.frag`:
 
 | Mode | `uMode` | Field | Threshold |
 |---|---|---|---|
 | shards | 0 | swipe direction plus a noise scatter | per-cell hash, swept along the swipe |
 | smoke | 1 | the same field, wider and blurrier | FBM, soft edge |
 | blow-away | 2 | radial out of the finger, blended with the swipe | distance from the finger |
+| erode | 3 | the touch trail: drag along the stroke, vortex pairs, curl noise | the accumulated erosion, then FBM for the leftovers |
 
 This is the **over a child snapshot** primitive of the build order: a plain
 `FragmentShader` painted by a `CustomPainter`, sampler 0 holding a `toImageSync`
@@ -76,9 +77,21 @@ Declaration order *is* the `setFloat` index; `_U` in `disintegrate.dart` mirrors
 | 24 | `uBlur` | smoke smear radius; 0 keeps a single read |
 | 25 | `uFade` | alpha exponent while departing |
 | 26 | `uEdgeFade` | fade band at the canvas border |
+| 27 | `uErodeRadius` | hole radius under a fresh stroke point |
+| 28 | `uErodeGrowth` | radius the hole gains per second |
+| 29 | `uErodeDrag` | pull along the stroke where it bites hardest |
+| 30 | `uErodeSwirl` | curl-noise eddies inside the eaten band |
+| 31 | `uErodeVortex` | counter-rotating pair dragged behind each point |
+| 32–159 | `uTrail[32]` | x, y in canvas px, age s, strength; strength 0 = empty slot |
+| 160–287 | `uTrailDir[32]` | unit stroke direction in xy; zw unused |
 
-27 floats, plus sampler 0 = the snapshot. Every knob is a field of
+288 floats, plus sampler 0 = the snapshot. Every knob is a field of
 `DisintegrationConfig`; nothing is hardcoded in Dart.
+
+The trail is two parallel arrays rather than one packed array: position, age and
+strength fill a `vec4` exactly, and the direction needs two more floats. Speed is
+not carried — the drag follows the erosion weight and the age, so nothing reads it.
+Only erode uploads the trail block; the other modes never enter the loop.
 
 `uSize` is used by `edgeFade` rather than left dangling: an unused uniform can be
 stripped by the compiler, which would shift every index after it.
@@ -120,17 +133,50 @@ front to back". `departure` squeezes that order into `[0, 1 − uSoftness]` so
 progress maps to the dissolved fraction about linearly and every cell still
 clears exactly at 1.
 
+Erode is the exception that proves the rule: its mask reads the erosion at `p`, the
+output pixel, not at the source. The hole is where the finger passed *on screen*,
+not a property of the material being sampled, so a single evaluation is correct —
+and the content pulled in from outside the hole is exactly the smear.
+
 Sampling the smoke mask needed one more correction: summed value-noise octaves
 cluster around 0.5, which gives a mask with no contrast and a card that fades
 rather than dissolves. `fbm` stretches the result by 2.2 about its mean.
 
-## 6. Cost per pixel
+## 6. The erode trail
+
+`ErodeTrail` emits one point per `trailSpacing` of travel and interpolates the
+timestamps across the segment, so a fast stroke lands as a spread of ages rather
+than one. It is a sibling of `GlassRipples`, not a reuse: that emitter's spacing,
+lifetime and amplitude all come from `GlassWave`, and pulling them apart would
+change the ripples API for no gain.
+
+The newest 32 points win. The oldest `fadeCount` taper their strength to 0 before
+eviction, because erosion only ever grows: dropping a point outright would *heal*
+the widget where the finger had already eaten through.
+
+Each point contributes a soft disc `exp(-r²/R(age)²)`, `R = uErodeRadius +
+uErodeGrowth · age`, and three velocity terms weighted by that same disc: the drag
+along `uTrailDir`, a counter-rotating vortex pair whose sense flips across the
+stroke (`clamp(dot(v, perp(dir)) / R, -1, 1)`, so it is smooth on the axis), and —
+outside the loop — curl noise. The curl is the rotated gradient of a value-noise
+potential, `(∂n/∂y, −∂n/∂x)` by forward differences, so it is divergence-free and
+the smear rolls into eddies instead of drifting. Two scales: `uNoiseScale`, and a
+quarter of it whose weight grows with the local age, so old smoke turns in big
+lobes. The potential is sampled at a point advected by `uErodeDrag · age`, so the
+eddies keep moving while the trail ages rather than sitting frozen on screen.
+
+The local age is the erosion-weighted mean of the point ages — the loop already
+sums the weights, so it costs one more accumulator and gives every pixel a "how
+long ago did the finger pass here".
+
+## 7. Cost per pixel
 
 | Mode | Texture reads | Noise |
 |---|---|---|
 | shards | 1 | 4 `valueNoise` (16 `hash12`): 2 for the scatter, 2 for the lattice warp; plus 1 `hash32` |
 | smoke | 3 | 5 `valueNoise` (20 `hash12`): 2 for the scatter, 3-octave FBM for the mask |
 | blow-away | 1 | as shards |
+| erode | 3 | 9 `valueNoise` (36 `hash12`): 6 for the two curl scales, 3-octave FBM for the mask; plus 32 trail points, each an `exp` behind a three-sigma reject |
 
 No loops, no derivatives, no dependent texture chains: the extra reads in smoke are
 fixed offsets from the first. The painter covers the card plus its spread margin,
@@ -140,7 +186,7 @@ Texture reads sit outside every branch: `sampleChild` masks out-of-bounds UVs
 arithmetically rather than branching, so `texture()`'s implicit LOD is never taken
 in divergent control flow.
 
-## 7. Gesture and settling
+## 8. Gesture and settling
 
 `DisintegrationController` owns progress, direction, origin and mode.
 Pan start captures the snapshot and the origin; pan update sets direction from the
@@ -150,10 +196,21 @@ past 0.6) or back to 0 — never a fixed duration, per `CONTEXT.md` step 5.
 `play(direction:)` runs the same settle without a finger, and `freeze(progress)`
 parks it anywhere for screenshots.
 
-## 8. Not in this shader
+Erode reverses that. The pan feeds the trail and leaves `progress` at 0 — the
+finger destroys directly, not through a progress bar — and a ticker keeps the
+controller notifying while the trail ages, since a still finger emits no points but
+its hole must keep widening. Release dismisses whenever the stroke travelled more
+than a quarter of `dismissDistance`: any real stroke destroys the widget. A shorter
+scratch springs back and clears the trail, so the widget heals rather than keeping
+holes it never earned.
+
+## 9. Not in this shader
 
 - **Per-shard depth or lighting.** Shards are flat snapshot fragments; there is no
   normal to light them with.
 - **Reassembly.** Springing back re-shows the live child rather than reversing the
   field, so a card that restores is interactive again immediately.
 - **Text-aware cells.** Cells are a warped lattice; they do not follow glyph edges.
+- **A second buffer.** Erode advects noise in one pass; there is no ping-pong
+  texture, so the smoke cannot remember what it did last frame. Everything it shows
+  is a function of the trail and the clock.

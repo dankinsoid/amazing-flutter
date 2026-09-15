@@ -3,7 +3,7 @@
 import 'package:flutter/foundation.dart';
 
 /// Which field and threshold the shader builds; the index is the `uMode` value.
-enum DisintegrationMode { shards, smoke, blowAway }
+enum DisintegrationMode { shards, smoke, blowAway, erode }
 
 /// Every knob of `shaders/disintegration.frag`, in logical px and seconds.
 @immutable
@@ -18,6 +18,12 @@ final class DisintegrationConfig {
 		this.noiseScale = 0.02,
 		this.turbulence = 110,
 		this.radial = 0.75,
+		this.erodeRadius = 16,
+		this.erodeGrowth = 8,
+		this.erodeDrag = 10,
+		this.erodeSwirl = 55,
+		this.erodeVortex = 48,
+		this.trailSpacing = 10,
 		this.softness = 0.3,
 		this.sweep = 0.6,
 		this.blur = 0,
@@ -55,6 +61,24 @@ final class DisintegrationConfig {
 
 	/// Blow-away: radial vs swipe direction in the flow, 0..1.
 	final double radial;
+
+	/// Erode: hole radius under a fresh stroke point.
+	final double erodeRadius;
+
+	/// Erode: radius the hole gains per second.
+	final double erodeGrowth;
+
+	/// Erode: pull along the stroke where it bites hardest.
+	final double erodeDrag;
+
+	/// Erode: curl-noise eddies inside the eaten band.
+	final double erodeSwirl;
+
+	/// Erode: counter-rotating pair dragged behind each stroke point.
+	final double erodeVortex;
+
+	/// Erode: stroke travel between trail points; under [erodeRadius], or the band beads.
+	final double trailSpacing;
 
 	/// Dissolve edge width, in progress units.
 	final double softness;
@@ -98,6 +122,17 @@ final class DisintegrationConfig {
 		fade: 0.7,
 	);
 
+	static const erode = DisintegrationConfig(
+		drift: 60,
+		lift: 40,
+		noiseScale: 0.03,
+		turbulence: 90,
+		softness: 0.4,
+		sweep: 0,
+		blur: 14,
+		fade: 0.7,
+	);
+
 	static const blowAway = DisintegrationConfig(
 		cellSize: 11,
 		drift: 150,
@@ -115,6 +150,7 @@ final class DisintegrationConfig {
 		DisintegrationMode.shards => shards,
 		DisintegrationMode.smoke => smoke,
 		DisintegrationMode.blowAway => blowAway,
+		DisintegrationMode.erode => erode,
 	};
 
 	DisintegrationConfig copyWith({
@@ -127,6 +163,12 @@ final class DisintegrationConfig {
 		double? noiseScale,
 		double? turbulence,
 		double? radial,
+		double? erodeRadius,
+		double? erodeGrowth,
+		double? erodeDrag,
+		double? erodeSwirl,
+		double? erodeVortex,
+		double? trailSpacing,
 		double? softness,
 		double? sweep,
 		double? blur,
@@ -146,6 +188,12 @@ final class DisintegrationConfig {
 		noiseScale: noiseScale ?? this.noiseScale,
 		turbulence: turbulence ?? this.turbulence,
 		radial: radial ?? this.radial,
+		erodeRadius: erodeRadius ?? this.erodeRadius,
+		erodeGrowth: erodeGrowth ?? this.erodeGrowth,
+		erodeDrag: erodeDrag ?? this.erodeDrag,
+		erodeSwirl: erodeSwirl ?? this.erodeSwirl,
+		erodeVortex: erodeVortex ?? this.erodeVortex,
+		trailSpacing: trailSpacing ?? this.trailSpacing,
 		softness: softness ?? this.softness,
 		sweep: sweep ?? this.sweep,
 		blur: blur ?? this.blur,

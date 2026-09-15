@@ -1,5 +1,6 @@
 // @ai-generated(solo)
 
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:amazing_flutter/amazing_flutter.dart';
@@ -9,6 +10,9 @@ import 'package:flutter/material.dart';
 const _debugProgress = -1.0;
 const _debugMode = DisintegrationMode.shards;
 const _debugAngle = 0.0;
+// Erode screenshot hook: draws a synthetic stroke, then parks a global progress on top.
+const _debugStroke = false;
+const _debugStrokeProgress = -1.0;
 
 typedef _Read = double Function(DisintegrationConfig c);
 typedef _Write = DisintegrationConfig Function(DisintegrationConfig c, double v);
@@ -37,6 +41,12 @@ const _knobs = <_Knob>[
 	_Knob('sweep', 0, 1, _sw, _ssw),
 	_Knob('blur', 0, 30, _bl, _sbl),
 	_Knob('fade', 0.2, 4, _fa, _sfa),
+	_Knob('erodeRadius', 5, 80, _er, _ser),
+	_Knob('erodeGrowth', 0, 120, _eg, _seg),
+	_Knob('erodeDrag', 0, 120, _ed, _sed),
+	_Knob('erodeSwirl', 0, 150, _et, _set),
+	_Knob('erodeVortex', 0, 150, _ev, _sev),
+	_Knob('trailSpacing', 4, 40, _ts, _sts),
 ];
 
 double _cs(DisintegrationConfig c) => c.cellSize;
@@ -65,6 +75,18 @@ double _bl(DisintegrationConfig c) => c.blur;
 DisintegrationConfig _sbl(DisintegrationConfig c, double v) => c.copyWith(blur: v);
 double _fa(DisintegrationConfig c) => c.fade;
 DisintegrationConfig _sfa(DisintegrationConfig c, double v) => c.copyWith(fade: v);
+double _er(DisintegrationConfig c) => c.erodeRadius;
+DisintegrationConfig _ser(DisintegrationConfig c, double v) => c.copyWith(erodeRadius: v);
+double _eg(DisintegrationConfig c) => c.erodeGrowth;
+DisintegrationConfig _seg(DisintegrationConfig c, double v) => c.copyWith(erodeGrowth: v);
+double _ed(DisintegrationConfig c) => c.erodeDrag;
+DisintegrationConfig _sed(DisintegrationConfig c, double v) => c.copyWith(erodeDrag: v);
+double _et(DisintegrationConfig c) => c.erodeSwirl;
+DisintegrationConfig _set(DisintegrationConfig c, double v) => c.copyWith(erodeSwirl: v);
+double _ev(DisintegrationConfig c) => c.erodeVortex;
+DisintegrationConfig _sev(DisintegrationConfig c, double v) => c.copyWith(erodeVortex: v);
+double _ts(DisintegrationConfig c) => c.trailSpacing;
+DisintegrationConfig _sts(DisintegrationConfig c, double v) => c.copyWith(trailSpacing: v);
 
 const _cards = <(String, String, List<Color>)>[
 	('Snap', 'swipe me away', [Color(0xFF7B2FF7), Color(0xFFF107A3)]),
@@ -93,7 +115,7 @@ class _DisintegrationDemoState extends State<DisintegrationDemo> with TickerProv
 	@override
 	void initState() {
 		super.initState();
-		if (_debugProgress < 0) return;
+		if (_debugProgress < 0 && !_debugStroke) return;
 		_mode = _debugMode;
 		_config = DisintegrationConfig.of(_debugMode);
 		_panel = false;
@@ -102,8 +124,36 @@ class _DisintegrationDemoState extends State<DisintegrationDemo> with TickerProv
 		}
 		// The snapshot needs a painted boundary, so freeze only after the first frame.
 		WidgetsBinding.instance.addPostFrameCallback((_) {
+			if (_debugStroke) {
+				_syntheticStroke();
+				return;
+			}
 			_freeze(_debugProgress);
 			debugPrint('debug freeze: mode=${_debugMode.name} progress=$_debugProgress angle=$_debugAngle');
+		});
+	}
+
+	/// Walks a diagonal across every card in real time, so the trail ages as a stroke would.
+	void _syntheticStroke() {
+		const from = Offset(18, 24);
+		const to = Offset(132, 176);
+		const steps = 15;
+		for (final effect in _effects) {
+			effect.beginDrag(from);
+		}
+		var i = 0;
+		Timer.periodic(const Duration(milliseconds: 50), (timer) {
+			i++;
+			for (final effect in _effects) {
+				effect.erode(Offset.lerp(from, to, i / steps)!);
+			}
+			if (i < steps) return;
+			timer.cancel();
+			debugPrint('debug stroke: mode=${_debugMode.name} points=${_effects.first.trail.points.length} progress=$_debugStrokeProgress');
+			if (_debugStrokeProgress < 0) return;
+			for (final effect in _effects) {
+				effect.freeze(_debugStrokeProgress);
+			}
 		});
 	}
 
