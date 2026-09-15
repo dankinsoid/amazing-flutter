@@ -23,6 +23,7 @@ final class DisintegrationConfig {
 		this.erodeExpand = 10,
 		this.erodeSwirl = 30,
 		this.erodeVortex = 40,
+		this.erodePush = 0.05,
 		this.erodeLifetime = 1.6,
 		this.trailSpacing = 10,
 		this.softness = 0.3,
@@ -77,6 +78,9 @@ final class DisintegrationConfig {
 
 	/// Erode: swirl around the finger, fading once it leaves.
 	final double erodeVortex;
+
+	/// Erode: px of shove per px/s of stroke speed; a fast swipe sweeps the smoke along.
+	final double erodePush;
 
 	/// Erode: disturbance-seconds over which the smoke thins to nothing.
 	final double erodeLifetime;
@@ -170,6 +174,7 @@ final class DisintegrationConfig {
 		double? erodeExpand,
 		double? erodeSwirl,
 		double? erodeVortex,
+		double? erodePush,
 		double? erodeLifetime,
 		double? trailSpacing,
 		double? softness,
@@ -196,6 +201,7 @@ final class DisintegrationConfig {
 		erodeExpand: erodeExpand ?? this.erodeExpand,
 		erodeSwirl: erodeSwirl ?? this.erodeSwirl,
 		erodeVortex: erodeVortex ?? this.erodeVortex,
+		erodePush: erodePush ?? this.erodePush,
 		erodeLifetime: erodeLifetime ?? this.erodeLifetime,
 		trailSpacing: trailSpacing ?? this.trailSpacing,
 		softness: softness ?? this.softness,

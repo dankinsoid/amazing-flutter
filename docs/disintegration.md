@@ -39,7 +39,9 @@ the means to freeze it. Three constraints shape it:
   acceptable, and noted on `ChildSnapshot.capture`.
 
 The primitive knows nothing about disintegration and is the intended base for
-fold, genie and page curl.
+fold, genie and page curl. `SpreadHitTest` ships with it: a box is hit only inside
+its own size, so an effect that paints into the margin needs its own hit test to
+stay touchable there.
 
 ## 3. Coordinates
 
@@ -82,17 +84,18 @@ Declaration order *is* the `setFloat` index; `_U` in `disintegrate.dart` mirrors
 | 29 | `uErodeExpand` | outward drift away from each point |
 | 30 | `uErodeSwirl` | curl-noise eddies |
 | 31 | `uErodeVortex` | swirl around the finger |
-| 32 | `uErodeLifetime` | disturbance-seconds over which the smoke thins to nothing |
-| 33–160 | `uTrail[32]` | x, y in canvas px, age s, strength; strength 0 = empty slot |
-| 161–288 | `uTrailDir[32]` | unit stroke direction in xy; zw unused |
+| 32 | `uErodePush` | px of shove per px/s of stroke speed |
+| 33 | `uErodeLifetime` | disturbance-seconds over which the smoke thins to nothing |
+| 34–161 | `uTrail[32]` | x, y in canvas px, age s, strength; strength 0 = empty slot |
+| 162–289 | `uTrailDir[32]` | unit stroke direction in xy, stroke speed px/s in z; w unused |
 
-289 floats, plus sampler 0 = the snapshot. Every knob is a field of
+290 floats, plus sampler 0 = the snapshot. Every knob is a field of
 `DisintegrationConfig`; nothing is hardcoded in Dart.
 
 The trail is two parallel arrays rather than one packed array: position, age and
-strength fill a `vec4` exactly, and the direction needs two more floats. Speed is
-not carried — the drag follows the erosion weight and the age, so nothing reads it.
-Only erode uploads the trail block; the other modes never enter the loop.
+strength fill a `vec4` exactly, and the direction needs two more floats — the spare
+`z` carries the stroke speed that drives the push. Only erode uploads the trail
+block; the other modes never enter the loop.
 
 `uSize` is used by `edgeFade` rather than left dangling: an unused uniform can be
 stripped by the compiler, which would shift every index after it.
@@ -164,18 +167,24 @@ only grows by 1.8×, while a card whose far corners are ~120 px from the stroke
 needs about 3× between "corners still crisp" and "eddies everywhere". Linear gives
 that range; the slowing-down that sqrt was for is supplied by the thinning instead.
 
-Every response is the front × the local age (the disturbance-weighted mean age of
-the points reaching this pixel, one extra accumulator in the same loop):
+Two accumulators come out of the same loop beside the front: the **stir time**,
+`max(weight · age)` over the points, and the **fresh weight**, the influence of
+points the finger only just laid down. Stir time only ever rises — a young point
+contributes `w · 0` — which is what keeps a second touch from making faded smoke
+solid again. Every response is built from those:
 
-- **displacement** = curl noise at two scales (the coarse one weighted by age, the
-  potential advected so the eddies keep turning) plus a radial drift away from each
-  point — curl is divergence-free and would never spread the cloud on its own —
-  plus the vortex pair around the finger, strongest under it and fading over the
-  lifetime;
-- **blur** = front × age, through the same three-tap `sampleSmeared`;
-- **alpha** = `1 − smoothstep(0, 1, front · age / uErodeLifetime)`, modulated by a
+- **displacement** = curl noise at two scales (the coarse one weighted by stir time,
+  the potential advected so the eddies keep turning) plus a radial drift away from
+  each point — curl is divergence-free and would never spread the cloud on its own —
+  plus the vortex pair around the finger and a **push** along the stroke,
+  `direction × speed × uErodePush`, so a fast swipe sweeps the smoke and a slow one
+  only swirls it. Push and vortex are normalised by the *fresh* weight, not the
+  total: a long-dead trail must not drown the stroke happening right now, and the
+  push is not gated by stir time, or the first moment of a stir would do nothing;
+- **blur** = stir time, through the same three-tap `sampleSmeared`;
+- **alpha** = `1 − smoothstep(0, 1, stir / uErodeLifetime)`, modulated by a
   low-contrast FBM so the cloud frays rather than fading flat. The smoke thins as it
-  spreads; nothing is ever cut out.
+  spreads; nothing is ever cut out, and a new touch only ever moves it.
 
 A pixel starts moving the instant the front reaches it — the response is
 `front · (0.15 + age / lifetime)`, not `front · age`, or the first moments of a
@@ -186,6 +195,22 @@ guarantees termination: on release the controller springs it to 1 with a spring
 soft enough to take about `erodeLifetime` (`DisintegrationController.springFor`),
 so the leftovers are gone even where the trail never reached.
 
+**Stirring.** A pan that lands while the smoke is still dissipating appends to the
+existing trail instead of restarting: `beginDrag` keeps the progress it has, the
+ramp stops while the finger is down, and the release springs on from there. Since
+the trail never empties in that state, such a stroke always ends in a dismissal —
+the widget is already dying, stirring only decides how it looks on the way out.
+
+The pointer has to reach the widget at all, which takes two things: the gesture
+detector is `HitTestBehavior.opaque`, because the child is hidden while the effect
+plays and would otherwise let every pointer through, and `SpreadHitTest` widens the
+hit area by a quarter of the spread so smoke that drifted off the child is still
+grabbable. Two caveats live with that: a parent laid out tightly around the child
+(a `Wrap`, a list tile) clips the margin away, since an ancestor that fails its own
+bounds check never calls down; and in a dense row a dissolving card's margin can
+claim a pointer meant for its neighbour, which is why the margin is a quarter of
+the spread rather than all of it.
+
 ## 7. Cost per pixel
 
 | Mode | Texture reads | Noise |
@@ -193,7 +218,7 @@ so the leftovers are gone even where the trail never reached.
 | shards | 1 | 4 `valueNoise` (16 `hash12`): 2 for the scatter, 2 for the lattice warp; plus 1 `hash32` |
 | smoke | 3 | 5 `valueNoise` (20 `hash12`): 2 for the scatter, 3-octave FBM for the mask |
 | blow-away | 1 | as shards |
-| erode | 3 | 9 `valueNoise` (36 `hash12`): 6 for the two curl scales, 3-octave FBM for the alpha grain; plus 32 trail points, each an `exp` behind a three-sigma reject |
+| erode | 3 | 9 `valueNoise` (36 `hash12`): 6 for the two curl scales, 3-octave FBM for the alpha grain; plus 32 trail points, each two `exp` behind a three-sigma reject |
 
 No loops, no derivatives, no dependent texture chains: the extra reads in smoke are
 fixed offsets from the first. The painter covers the card plus its spread margin,

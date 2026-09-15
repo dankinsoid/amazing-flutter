@@ -17,6 +17,9 @@ const _debugStroke = false;
 const _debugStrokeProgress = -1.0;
 // Seconds after the stroke at which a snap is written; see snap.dart.
 const _debugSnapAt = <double>[];
+// Seconds after the first stroke at which a second, faster one is injected as pointer
+// events through the real hit test; below 0 = off.
+const _debugStirAt = -1.0;
 
 typedef _Read = double Function(DisintegrationConfig c);
 typedef _Write = DisintegrationConfig Function(DisintegrationConfig c, double v);
@@ -51,6 +54,7 @@ const _knobs = <_Knob>[
 	_Knob('erodeLife', 0.3, 6, _el, _sel),
 	_Knob('erodeSwirl', 0, 150, _et, _set),
 	_Knob('erodeVortex', 0, 150, _ev, _sev),
+	_Knob('erodePush', 0, 0.2, _ep, _sep),
 	_Knob('trailSpacing', 4, 40, _ts, _sts),
 ];
 
@@ -92,6 +96,8 @@ double _et(DisintegrationConfig c) => c.erodeSwirl;
 DisintegrationConfig _set(DisintegrationConfig c, double v) => c.copyWith(erodeSwirl: v);
 double _ev(DisintegrationConfig c) => c.erodeVortex;
 DisintegrationConfig _sev(DisintegrationConfig c, double v) => c.copyWith(erodeVortex: v);
+double _ep(DisintegrationConfig c) => c.erodePush;
+DisintegrationConfig _sep(DisintegrationConfig c, double v) => c.copyWith(erodePush: v);
 double _ts(DisintegrationConfig c) => c.trailSpacing;
 DisintegrationConfig _sts(DisintegrationConfig c, double v) => c.copyWith(trailSpacing: v);
 
@@ -113,6 +119,7 @@ class _DisintegrationDemoState extends State<DisintegrationDemo> with TickerProv
 		for (var i = 0; i < _cards.length; i++) DisintegrationController(vsync: this),
 	];
 	final _gone = <int>{};
+	final _firstCard = GlobalKey();
 	DisintegrationMode _mode = DisintegrationMode.shards;
 	DisintegrationConfig _config = DisintegrationConfig.shards;
 	double _frozen = 0;
@@ -159,11 +166,41 @@ class _DisintegrationDemoState extends State<DisintegrationDemo> with TickerProv
 			timer.cancel();
 			debugPrint('debug stroke: mode=${_debugMode.name} points=${_effects.first.trail.points.length} progress=$_debugStrokeProgress');
 			_scheduleSnaps();
+			if (_debugStirAt >= 0) {
+				Future<void>.delayed(Duration(milliseconds: (_debugStirAt * 1000).round()), _injectStir);
+			}
 			if (_debugStrokeProgress < 0) return;
 			for (final effect in _effects) {
 				effect.freeze(_debugStrokeProgress);
 			}
 		});
+	}
+
+	/// Real pointer events, so the stir goes through hit testing rather than around it.
+	Future<void> _injectStir() async {
+		final box = _firstCard.currentContext?.findRenderObject();
+		if (box is! RenderBox) return;
+		final origin = box.localToGlobal(Offset.zero);
+		const from = Offset(15, 165);
+		const to = Offset(235, 55);
+		const steps = 8;
+		const pointer = 7;
+		var time = const Duration(seconds: 30);
+		var last = origin + from;
+		final binding = WidgetsBinding.instance;
+		final view = View.of(context).viewId;
+		binding.handlePointerEvent(PointerDownEvent(viewId: view, pointer: pointer, position: last, timeStamp: time));
+		for (var i = 1; i <= steps; i++) {
+			await Future<void>.delayed(const Duration(milliseconds: 16));
+			time += const Duration(milliseconds: 16);
+			final at = origin + Offset.lerp(from, to, i / steps)!;
+			binding.handlePointerEvent(
+				PointerMoveEvent(viewId: view, pointer: pointer, position: at, delta: at - last, timeStamp: time),
+			);
+			last = at;
+		}
+		binding.handlePointerEvent(PointerUpEvent(viewId: view, pointer: pointer, position: last, timeStamp: time));
+		debugPrint('debug stir: trail=${_effects.first.trail.points.length} progress=${_effects.first.progress.toStringAsFixed(2)}');
 	}
 
 	@override
@@ -265,6 +302,7 @@ class _DisintegrationDemoState extends State<DisintegrationDemo> with TickerProv
 		if (_gone.contains(index)) return const SizedBox(width: 150, height: 200);
 		final (title, hint, colors) = _cards[index];
 		return Disintegrate(
+			key: index == 0 ? _firstCard : null,
 			controller: _effects[index],
 			config: _config,
 			onDismissed: () => _onDismissed(index),

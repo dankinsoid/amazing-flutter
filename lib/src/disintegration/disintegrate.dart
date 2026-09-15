@@ -16,8 +16,8 @@ abstract final class _U {
 	static const noiseScale = 19, turbulence = 20, radial = 21;
 	static const softness = 22, sweep = 23, blur = 24, fade = 25, edgeFade = 26;
 	static const erodeRadius = 27, erodeSpread = 28, erodeExpand = 29, erodeSwirl = 30;
-	static const erodeVortex = 31, erodeLifetime = 32;
-	static const trail = 33, trailDir = 161, trailStride = 4, maxTrail = 32;
+	static const erodeVortex = 31, erodePush = 32, erodeLifetime = 33;
+	static const trail = 34, trailDir = 162, trailStride = 4, maxTrail = 32;
 }
 
 /// Dissolves [child] on a swipe: shards, smoke, or blown out of the finger.
@@ -62,6 +62,7 @@ class _DisintegrateState extends State<Disintegrate> with SingleTickerProviderSt
 		super.initState();
 		_effect.trail.spacing = widget.config.trailSpacing;
 		_effect.addListener(_onEffect);
+		_snapshot.addListener(_onFrozen);
 		_program ??= ui.FragmentProgram.fromAsset('packages/amazing_flutter/shaders/disintegration.frag');
 		_program!.then((program) {
 			if (!mounted) return;
@@ -81,12 +82,16 @@ class _DisintegrateState extends State<Disintegrate> with SingleTickerProviderSt
 
 	@override
 	void dispose() {
+		_snapshot.removeListener(_onFrozen);
 		_effect.removeListener(_onEffect);
 		_private?.dispose();
 		_snapshot.dispose();
 		_shader?.dispose();
 		super.dispose();
 	}
+
+	// Freezing switches the hit test to the enlarged canvas.
+	void _onFrozen() => setState(() {});
 
 	void _onEffect() {
 		final effect = _effect;
@@ -156,12 +161,21 @@ class _DisintegrateState extends State<Disintegrate> with SingleTickerProviderSt
 			child: widget.child,
 		);
 		if (!widget.enabled) return host;
-		return GestureDetector(
-			onPanStart: _onStart,
-			onPanUpdate: _onUpdate,
-			onPanEnd: _onEnd,
-			onPanCancel: _onCancel,
-			child: host,
+		return SpreadHitTest(
+			// A quarter of the spread: enough to grab drifting smoke, little enough
+			// that a dissolving card does not swallow its neighbour's pointers.
+			margin: widget.config.spread * 0.25,
+			// Dissipating smoke must stay grabbable, wherever it has drifted to.
+			enabled: _effect.mode == DisintegrationMode.erode && _snapshot.isFrozen,
+			child: GestureDetector(
+				// The child is hidden while the effect plays; the pan must land anyway.
+				behavior: HitTestBehavior.opaque,
+				onPanStart: _onStart,
+				onPanUpdate: _onUpdate,
+				onPanEnd: _onEnd,
+				onPanCancel: _onCancel,
+				child: host,
+			),
 		);
 	}
 }
@@ -233,6 +247,7 @@ class _DisintegrationPainter extends ChildSnapshotPainter {
 			..setFloat(_U.erodeExpand, config.erodeExpand)
 			..setFloat(_U.erodeSwirl, config.erodeSwirl)
 			..setFloat(_U.erodeVortex, config.erodeVortex)
+			..setFloat(_U.erodePush, config.erodePush)
 			..setFloat(_U.erodeLifetime, config.erodeLifetime);
 		if (effect.mode == DisintegrationMode.erode) _writeTrail(shader, rect);
 		shader.setImageSampler(0, snapshot);
@@ -258,7 +273,8 @@ class _DisintegrationPainter extends ChildSnapshotPainter {
 				..setFloat(slot + 2, point.ageAt(now))
 				..setFloat(slot + 3, point.strength)
 				..setFloat(direction, point.direction.dx)
-				..setFloat(direction + 1, point.direction.dy);
+				..setFloat(direction + 1, point.direction.dy)
+				..setFloat(direction + 2, point.speed);
 		}
 	}
 

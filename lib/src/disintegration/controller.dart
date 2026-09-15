@@ -61,14 +61,16 @@ class DisintegrationController extends ChangeNotifier {
 	}
 
 	void beginDrag(Offset origin) {
+		// A finger landing in smoke that is still dissipating stirs it; it does not start over.
+		final stirring = _mode == DisintegrationMode.erode && !trail.isEmpty;
 		_anim.stop();
 		_generation++;
 		_origin = origin;
-		_progress = 0;
+		if (!stirring) _progress = 0;
 		_status = DisintegrationStatus.dragging;
 		if (_mode == DisintegrationMode.erode) {
 			trail.start(origin);
-			_trailTicker.start();
+			if (!_trailTicker.isActive) _trailTicker.start();
 		}
 		notifyListeners();
 	}

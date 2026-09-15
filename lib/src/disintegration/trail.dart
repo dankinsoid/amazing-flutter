@@ -8,6 +8,7 @@ final class ErodePoint {
 		required this.position,
 		required this.direction,
 		DateTime? startedAt,
+		this.speed = 0,
 		this.strength = 1,
 	}) : startedAt = startedAt ?? DateTime.now();
 
@@ -18,6 +19,9 @@ final class ErodePoint {
 
 	final DateTime startedAt;
 
+	/// Stroke speed here, px/s; what turns a fast swipe into a push.
+	final double speed;
+
 	/// Tapers to 0 over the oldest slots so eviction does not pop.
 	final double strength;
 
@@ -27,6 +31,7 @@ final class ErodePoint {
 		position: position,
 		direction: direction,
 		startedAt: startedAt,
+		speed: speed,
 		strength: value,
 	);
 }
@@ -85,11 +90,13 @@ final class ErodeTrail {
 		final direction = delta / travel;
 		final steps = travel ~/ spacing;
 		final lastAt = _lastAt ?? now;
+		final elapsed = now.difference(lastAt).inMicroseconds / 1e6;
+		final speed = elapsed > 1e-4 ? travel / elapsed : 0.0;
 		for (var i = 1; i <= steps; i++) {
 			final f = i * spacing / travel;
 			// Timestamps interpolate, or a fast stroke lands as one age.
 			final t = lastAt.add(Duration(microseconds: (now.difference(lastAt).inMicroseconds * f).round()));
-			_add(ErodePoint(position: last + delta * f, direction: direction, startedAt: t));
+			_add(ErodePoint(position: last + delta * f, direction: direction, startedAt: t, speed: speed));
 		}
 		_length += steps * spacing;
 		_last = last + delta * (steps * spacing / travel);

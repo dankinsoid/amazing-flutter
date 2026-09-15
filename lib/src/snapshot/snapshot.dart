@@ -148,3 +148,48 @@ class _SnapshotHostState extends State<SnapshotHost> {
 		);
 	}
 }
+
+/// Takes pointers up to [margin] outside [child]; a box is otherwise hit only inside its size.
+///
+/// Wrap it around the gesture detector, not inside it: an ancestor that fails its
+/// own bounds check never calls down — which is also why a tight parent layout
+/// still clips the margin away, and why a neighbour's margin can claim a pointer.
+class SpreadHitTest extends SingleChildRenderObjectWidget {
+	const SpreadHitTest({super.key, required this.margin, required this.enabled, required super.child});
+
+	final double margin;
+	final bool enabled;
+
+	@override
+	RenderSpreadHitTest createRenderObject(BuildContext context) =>
+		RenderSpreadHitTest(margin: margin, enabled: enabled);
+
+	@override
+	void updateRenderObject(BuildContext context, covariant RenderSpreadHitTest renderObject) {
+		renderObject
+			..margin = margin
+			..enabled = enabled;
+	}
+}
+
+class RenderSpreadHitTest extends RenderProxyBox {
+	RenderSpreadHitTest({required double margin, required bool enabled})
+		: _margin = margin,
+		  _enabled = enabled;
+
+	double _margin;
+	bool _enabled;
+
+	set margin(double value) => _margin = value;
+
+	set enabled(bool value) => _enabled = value;
+
+	@override
+	bool hitTest(BoxHitTestResult result, {required Offset position}) {
+		if (!_enabled) return super.hitTest(result, position: position);
+		if (!(Offset.zero & size).inflate(_margin).contains(position)) return false;
+		// Hit the child at its nearest edge; the event keeps its real position.
+		final inside = Offset(position.dx.clamp(0.0, size.width), position.dy.clamp(0.0, size.height));
+		return super.hitTest(result, position: inside);
+	}
+}
