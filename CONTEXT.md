@@ -49,6 +49,12 @@ each one has a rationale in `README.md`.
    layout's target position and the painted position — it belongs inside that
    collection engine and cannot be extracted.
 
+7. **Benchmark every shader against the native blur.** At the end, each effect
+   gets a raster-thread measurement in `--profile` next to a plain
+   `BackdropFilter.blur` of the same area on the same device — the one GPU effect
+   everybody already ships everywhere, so "X× a blur" is a cost readers can feel.
+   Numbers without that baseline are not comparable across devices.
+
 ## Build order
 
 Each step exists to unblock the next, not because it is the prettiest.
