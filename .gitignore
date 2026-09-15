@@ -6,3 +6,4 @@ build/
 .flutter-plugins-dependencies
 *.iml
 .idea/
+.claude/worktrees/
