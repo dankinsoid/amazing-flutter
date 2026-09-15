@@ -17,11 +17,13 @@ final class FluidConfig {
 		this.densityDissipation = 1.1,
 		this.velocityDissipation = 0.2,
 		this.dissipationSpeed = 200,
+		this.greying = 0.35,
 		this.splatRadius = 20,
 		this.splatForce = 10,
 		this.shading = 0,
 		this.lifetime = 3,
 		this.fadeOut = 1,
+		this.fadeDecay = 12,
 		this.edgeFade = 40,
 		this.velocityRange = 512,
 		this.curlRange = 256,
@@ -54,6 +56,9 @@ final class FluidConfig {
 	/// Flow speed of full dye decay, logical px/s; still dye never fades.
 	final double dissipationSpeed;
 
+	/// How far decaying dye is pulled to its own luminance, 0..1; 0 keeps the colour.
+	final double greying;
+
 	/// Radius where a splat's velocity falls to 1/e, logical px.
 	final double splatRadius;
 
@@ -68,6 +73,9 @@ final class FluidConfig {
 
 	/// Seconds of global fade at the end of [lifetime].
 	final double fadeOut;
+
+	/// Dissipation added everywhere at the end of [fadeOut], 1/s; what ends the dye.
+	final double fadeDecay;
 
 	/// Fade band at the scene border, logical px; the walls trap dye there.
 	final double edgeFade;
@@ -88,7 +96,7 @@ final class FluidConfig {
 	final double floatFields;
 
 	/// Thins fast and rolls hard; a card is gone within its lifetime.
-	static const smoke = FluidConfig(densityDissipation: 1.6, curl: 36, dissipationSpeed: 160);
+	static const smoke = FluidConfig(densityDissipation: 1.6, curl: 36, dissipationSpeed: 160, greying: 0.6);
 
 	/// Keeps its colour: slow decay, low drag, long filaments.
 	static const ink = FluidConfig(
@@ -96,6 +104,7 @@ final class FluidConfig {
 		curl: 44,
 		velocityDissipation: 0.1,
 		dissipationSpeed: 280,
+		greying: 0,
 		lifetime: 4,
 	);
 
@@ -105,6 +114,7 @@ final class FluidConfig {
 		curl: 5,
 		velocityDissipation: 2.2,
 		dissipationSpeed: 110,
+		greying: 0.2,
 		splatForce: 7,
 		lifetime: 3.5,
 	);
@@ -124,11 +134,13 @@ final class FluidConfig {
 		double? densityDissipation,
 		double? velocityDissipation,
 		double? dissipationSpeed,
+		double? greying,
 		double? splatRadius,
 		double? splatForce,
 		double? shading,
 		double? lifetime,
 		double? fadeOut,
+		double? fadeDecay,
 		double? edgeFade,
 		double? velocityRange,
 		double? curlRange,
@@ -144,11 +156,13 @@ final class FluidConfig {
 		densityDissipation: densityDissipation ?? this.densityDissipation,
 		velocityDissipation: velocityDissipation ?? this.velocityDissipation,
 		dissipationSpeed: dissipationSpeed ?? this.dissipationSpeed,
+		greying: greying ?? this.greying,
 		splatRadius: splatRadius ?? this.splatRadius,
 		splatForce: splatForce ?? this.splatForce,
 		shading: shading ?? this.shading,
 		lifetime: lifetime ?? this.lifetime,
 		fadeOut: fadeOut ?? this.fadeOut,
+		fadeDecay: fadeDecay ?? this.fadeDecay,
 		edgeFade: edgeFade ?? this.edgeFade,
 		velocityRange: velocityRange ?? this.velocityRange,
 		curlRange: curlRange ?? this.curlRange,
@@ -172,11 +186,13 @@ final class FluidConfig {
 		densityDissipation,
 		velocityDissipation,
 		dissipationSpeed,
+		greying,
 		splatRadius,
 		splatForce,
 		shading,
 		lifetime,
 		fadeOut,
+		fadeDecay,
 		edgeFade,
 		velocityRange,
 		curlRange,

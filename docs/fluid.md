@@ -118,10 +118,27 @@ would cost an advection pass and a texture for a case the default config never
 reaches. It is the right answer for a much longer lifetime, and nothing else in
 the design has to change to add it.
 
-Termination does not lean on dissipation at all. The scene runs for `lifetime`
-seconds after the last finger lifts, and the display pass multiplies by an
-`opacity` that ramps to zero over the final `fadeOut` seconds. The clock does not
-run while a finger is down, so **the global fade can never start mid-stroke**.
+### Ending in the field, not on the layer
+
+A layer opacity ramped to zero is a crossfade: the colours stay what they were
+and the whole thing turns see-through at once. Smoke does not do that — it goes
+pale and grey as it thins. So the end of life happens **inside the dye**:
+
+- `uSettle` adds dissipation everywhere, ramped from 0 to `fadeDecay` over the
+  `fadeOut` tail. It is the same exponential decay the flow already applies,
+  just no longer gated on speed, so the dye thins where it stands.
+- `uGrey` pulls decaying dye toward its own luminance, in proportion to how much
+  decay is being applied that frame: `grey = greying * rate * dt`. Dye that is
+  not decaying does not shift at all, so a solid card keeps its colour exactly,
+  and a plume greys as it thins. In premultiplied space the luma dot product is
+  the grey of the same alpha, so the result stays a valid premultiplied colour.
+
+The display's `opacity` remains, but only over the last 30 % of `fadeOut` and
+only as the guarantee that the effect *ends*. By the time it starts moving, the
+field is down to a few per cent (measured: the dye is visually gone at
+settle 0.75, where the opacity multiplier is still 0.83), so in the normal case
+it is invisible. The clock does not run while a finger is down, so neither the
+settle dissipation nor the opacity can start mid-stroke.
 
 ## 4. Lifetime, stirring, and taps
 
@@ -193,7 +210,7 @@ the image through the `PassRunner` — `toImageSync` rasterises lazily, so the
 child must not free it.
 
 The dye covers the whole scene at the scene's device resolution. Three things
-keep the stamp exact:
+keep the stamp within a least significant bit of the child:
 
 - the stamp rect is snapped to whole **device** pixels,
 - at dye scale 1 the draw is `FilterQuality.none`,
@@ -201,10 +218,11 @@ keep the stamp exact:
   helpers land on exact texel centres, so `floor`/`fract` return the source texel
   untouched.
 
-Measured: a stamped card with zero velocity is **byte-identical** to the live
-child over the whole 1600 × 1200 frame — max channel difference 0 (§7). With a
-`dyeResolution` cap the seed is resampled and the card visibly softens the moment
-it is stamped, which is why the default cap is 0.
+Measured: a stamped card with zero velocity differs from the live child by at
+most **2 / 255**, with not one pixel off by more than 4, and the rest of the
+frame is identical byte for byte (§9). The residual is the RGBA8 dye round trip,
+not a resample. With a `dyeResolution` cap the seed *is* resampled and the card
+visibly softens the moment it is stamped, which is why the default cap is 0.
 
 Dye is stored premultiplied, which is also the correct space to interpolate in;
 dissipation divides all four channels, so the smoke thins without tinting.
@@ -327,12 +345,18 @@ the 4.3 s frame below is byte-identical to the untouched one.
 
 | dye resolution | max channel diff | pixels off by > 4 |
 |---|---|---|
-| native (`dyeResolution: 0`) | **0 / 255** | 0 |
+| native (`dyeResolution: 0`) | **2 / 255** | 0 |
 
 Measured by stamping every card with no pointer motion at all, freezing the
 settle clock, and comparing the rendered frame against the same frame before the
-stamp. The two PNGs are byte-identical, MD5 and all. The spike's 2/255 residual
-is gone because the dye no longer carries the card through a resample.
+stamp. Every differing pixel lies inside one of the three card rects; outside
+them the frame is identical byte for byte, which is also what proves the stamp
+happened. 2 / 255 is the RGBA8 dye round trip, the same residual the spike
+measured, and it is invisible.
+
+An earlier run of this test reported 0 / 255. That run was wrong: it predated the
+`canStamp` fix, so the stamp was silently refused and both frames were the live
+card. A zero here means nothing unless the diff is non-zero *somewhere*.
 
 ### What the frames show
 
@@ -351,10 +375,15 @@ card-local (18, 24) to (132, 176) over 0.25 s starting at t = 0.8 s.
   own footprint, and the card bodies are still saturated. Median brightness inside
   the original card rect is 191 / 177 / 214 against 214 / 199 / 251 for the live
   card: down 11–15 %, all of it displacement rather than fade.
-- **2.5 s** — the plumes have thinned and spread across the lower half of the
-  scene, one card's dye reaching into its neighbour's column. The card cores are
-  still there. The global `fadeOut` has begun by this point (opacity ≈ 0.75), so
-  part of the dimming is the ending, not the fluid.
+- **2.5 s** — the plumes have thinned, desaturated into grey smoke and spread
+  across the lower half of the scene, one card's dye reaching into its
+  neighbour's column; the card cores still hold their colour. Mean saturation
+  over the dye falls from 103 at 1.0 s to 39 here, against 111 → 65 with
+  `greying: 0`.
+- **The tail** — at settle 0.5 the smoke is faint grey ghosts of the cards, at
+  0.75 it is gone, and the effect ends at 1.0. The card-rect median brightness
+  runs 188 → 83 → 61 → 56 against a background of about 45. The layer opacity is
+  still 0.83 when there is nothing left to fade.
 - **1.5 s after a second fast stroke through the flow** — textbook
   Kelvin-Helmholtz mushrooms and shear curls, and the colours have **mixed**:
   magenta runs into the cyan region, cyan under the orange, the yellow carried to
@@ -379,10 +408,10 @@ all numbers and frames are macOS/Metal. The `--profile` table was taken with an
 occluded window driven by `scheduleForcedFrame`, which is how the harness gets
 frames at all; the absolute numbers therefore include the demo's own
 recompositing, which is why the idle row is quoted as the baseline to subtract.
-The frames also show a faint crunchy fringe on fast-moving dye edges — the dye
-grid is six times finer than the velocity grid, so sub-grid detail is stretched
-into filaments rather than resolved. It reads as smoke texture at these speeds,
-but it is an artefact, not physics.
+The dye grid is six times finer than the velocity grid, so sub-grid detail is
+stretched into filaments rather than resolved; the fine texture on fast-moving
+edges is that, not physics. It is not the same thing as the sim-texel staircase
+that a nearest velocity tap produced (§11) — that one was a bug and is fixed.
 
 ### Sim-grid safety
 
@@ -426,6 +455,9 @@ Fluid(                            // a source of dye inside that scene
 )
 ```
 
+`FluidConfig.greying` sets how far decaying dye desaturates (0 in the `ink`
+preset, 0.6 in `smoke`); `fadeDecay` is the dissipation the tail ramps up to.
+
 `FluidSceneController` carries the clock (`settled`, `opacity`, `freeze`,
 `resume`, `reset`), the pointer funnel (`down`/`moveTo`/`up`), scripted strokes
 (`stroke`), and telemetry (`passes`, `liveImages`). `FluidController` is the
@@ -439,6 +471,13 @@ one restarts the scene rather than corrupting the buffers.
 
 ## 11. Traps hit while building this
 
+- **Every cross-resolution sampler read must be filtered by hand.** Flutter does
+  not expose a sampler's filter mode, and a `toImageSync` image reads nearest.
+  The dye advection samples a velocity grid six times coarser than its own, so a
+  raw `texture()` gave every dye texel in a sim cell the same push and the dye
+  edges came out as hard 6-px squares. Both `bilerpVelocity` and `bilerpSource`
+  exist for this; the same-grid passes (curl, divergence, pressure, gradient,
+  splat) tap exact texel centres and do not need it.
 - **A sampler cannot be a function parameter in SkSL.** `vec4 bilerp(sampler2D
   s, ...)` compiles for Impeller and fails the SkSL target, which makes the whole
   `.frag` refuse to load on Skia. Read the sampler directly from the global.

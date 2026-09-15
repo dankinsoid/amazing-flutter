@@ -150,7 +150,7 @@ class FluidSceneState extends State<FluidScene> with SingleTickerProviderStateMi
 		for (final (at, delta) in controller.takeSplats()) {
 			solver.splat(at, delta);
 		}
-		solver.step(dt);
+		solver.step(dt, controller.settle);
 		controller
 			..passes = solver.passes
 			..liveImages = solver.liveImages;

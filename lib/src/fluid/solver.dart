@@ -12,7 +12,7 @@ abstract final class _U {
 
 	static const advTexel = 2, advSourceTexel = 4, advDt = 6;
 	static const advDissipation = 7, advVector = 8, advVelCode = 9, advSourceCode = 11;
-	static const advSpeedRef = 13;
+	static const advSpeedRef = 13, advSettle = 14, advGrey = 15;
 
 	static const curlTexel = 2, curlVelCode = 4, curlCurlCode = 6;
 
@@ -248,7 +248,8 @@ class FluidSolver {
 		_passes++;
 	}
 
-	void step(double dt) {
+	/// [settle] is 0 while the dye must persist and 1 at the end of its life.
+	void step(double dt, double settle) {
 		if (_dye.isEmpty) return;
 		final vel = _code(_config.velocityRange);
 		final crl = _code(_config.curlRange);
@@ -262,7 +263,7 @@ class FluidSolver {
 		_pressurePasses(texel, prs, div);
 		_gradientPass(texel, vel, prs);
 		_advectVelocity(texel, dt, vel);
-		_advectDye(texel, dt);
+		_advectDye(texel, dt, settle);
 	}
 
 	void _curlPass(ui.Offset texel, (double, double) vel, (double, double) crl) {
@@ -359,7 +360,7 @@ class FluidSolver {
 
 	void _advectVelocity(ui.Offset texel, double dt, (double, double) vel) {
 		final shader = shaders.advection;
-		_writeAdvection(shader, texel, texel, dt, _config.velocityDissipation, 1, 0, vel, vel);
+		_writeAdvection(shader, texel, texel, dt, _config.velocityDissipation, 1, 0, 0, 0, vel, vel);
 		shader
 			..setFloat(_U.resolution, _simW.toDouble())
 			..setFloat(_U.resolution + 1, _simH.toDouble())
@@ -369,7 +370,7 @@ class FluidSolver {
 		_passes++;
 	}
 
-	void _advectDye(ui.Offset texel, double dt) {
+	void _advectDye(ui.Offset texel, double dt, double settle) {
 		final shader = shaders.advection;
 		final vel = _code(_config.velocityRange);
 		_writeAdvection(
@@ -380,6 +381,8 @@ class FluidSolver {
 			_config.densityDissipation,
 			0,
 			_config.dissipationSpeed * _texelsPerPx,
+			settle.clamp(0.0, 1.0) * _config.fadeDecay,
+			_config.greying,
 			vel,
 			(1, 0),
 		);
@@ -400,6 +403,8 @@ class FluidSolver {
 		double dissipation,
 		double vector,
 		double speedRef,
+		double settle,
+		double grey,
 		(double, double) vel,
 		(double, double) source,
 	) {
@@ -415,7 +420,9 @@ class FluidSolver {
 			..setFloat(_U.advVelCode + 1, vel.$2)
 			..setFloat(_U.advSourceCode, source.$1)
 			..setFloat(_U.advSourceCode + 1, source.$2)
-			..setFloat(_U.advSpeedRef, speedRef);
+			..setFloat(_U.advSpeedRef, speedRef)
+			..setFloat(_U.advSettle, settle)
+			..setFloat(_U.advGrey, grey);
 	}
 
 	/// Paints the dye over [size]; the caller owns the canvas and its transform.

@@ -69,15 +69,22 @@ class FluidSceneController extends ChangeNotifier {
 	/// Debug hold: the sim keeps stepping but the clock never reaches [lifetime].
 	bool get isFrozen => _frozen;
 
-	/// Rate-limited, so a stamp during the tail brings the dye back without a cut.
+	/// The last-resort layer fade; the dye is already all but gone when it moves.
 	double get opacity => _opacity;
 
-	double get _targetOpacity {
-		if (_status != FluidSceneStatus.settling || fadeOut <= 0) return 1;
+	/// Share of [fadeOut] over which [opacity] does the guaranteeing, once the
+	/// field's own dissipation has taken the dye down to a few per cent.
+	static const _guarantee = 0.3;
+
+	/// 0 while the dye must persist, 1 at the end of the tail; drives the dissipation.
+	double get settle {
+		if (_status != FluidSceneStatus.settling || fadeOut <= 0) return 0;
 		final tail = lifetime - fadeOut;
-		if (_settled <= tail) return 1;
-		return (1 - (_settled - tail) / fadeOut).clamp(0.0, 1.0);
+		if (_settled <= tail) return 0;
+		return ((_settled - tail) / fadeOut).clamp(0.0, 1.0);
 	}
+
+	double get _targetOpacity => (1 - (settle - (1 - _guarantee)) / _guarantee).clamp(0.0, 1.0);
 
 	/// A fresh stamp restarts the clock; the new dye gets a full lifetime.
 	void wake() {
@@ -162,7 +169,7 @@ class FluidSceneController extends ChangeNotifier {
 
 	// The fade's own slope is the limit, so fading is exact and recovery mirrors it.
 	void _slewOpacity(double dt) {
-		final step = fadeOut > 0 ? dt / fadeOut : 1.0;
+		final step = fadeOut > 0 ? dt / (fadeOut * _guarantee) : 1.0;
 		_opacity = (_opacity + (_targetOpacity - _opacity).clamp(-step, step)).clamp(0.0, 1.0);
 	}
 
