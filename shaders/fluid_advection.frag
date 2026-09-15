@@ -22,8 +22,9 @@ uniform float uDissipation;  // [7] decay per second
 uniform float uVector;       // [8] 1 advects packed velocity, 0 advects premultiplied dye
 uniform vec2 uVelCode;       // [9..10] velocity store: value * x + y
 uniform vec2 uSourceCode;    // [11..12] advected field store; identity for the dye
+uniform float uSpeedRef;     // [13] speed of full decay, grid texels/s; 0 decays everywhere
 
-// Total: 13 floats.
+// Total: 14 floats.
 
 uniform sampler2D uVelocity;  // sampler 0
 uniform sampler2D uSource;    // sampler 1
@@ -51,7 +52,9 @@ void main() {
 	vec2 velocity = (texture(uVelocity, uv).xy - uVelCode.y) / uVelCode.x;
 	vec2 coord = uv - uDt * velocity * uTexel;
 	vec4 source = bilerpSource(coord);
-	float decay = 1.0 + uDissipation * uDt;
+	// Dye fades where it flows, not where it sits: untouched pixels must stay solid.
+	float local = uSpeedRef > 0.0 ? smoothstep(0.0, uSpeedRef, length(velocity)) : 1.0;
+	float decay = 1.0 + uDissipation * uDt * local;
 
 	if (uVector > 0.5) {
 		vec2 value = (source.xy - uSourceCode.y) / uSourceCode.x / decay;

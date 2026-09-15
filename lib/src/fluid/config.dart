@@ -2,38 +2,38 @@
 
 import 'package:flutter/foundation.dart';
 
-/// Every knob of the fluid solver; defaults are Dobryakov's, see `docs/fluid.md`.
+/// Named looks of the solver; the index carries no meaning to the shaders.
+enum FluidPreset { smoke, ink, honey }
+
+/// Every knob of the fluid scene, in logical px and seconds; see `docs/fluid.md`.
 @immutable
 final class FluidConfig {
 	const FluidConfig({
-		this.simResolution = 128,
+		this.simResolution = 256,
 		this.dyeResolution = 0,
 		this.pressureIterations = 20,
 		this.pressure = 0.8,
 		this.curl = 30,
-		this.densityDissipation = 1,
+		this.densityDissipation = 1.1,
 		this.velocityDissipation = 0.2,
-		this.splatRadius = 0.25,
-		this.splatForce = 6000,
+		this.dissipationSpeed = 200,
+		this.splatRadius = 20,
+		this.splatForce = 10,
 		this.shading = 0,
 		this.lifetime = 3,
 		this.fadeOut = 1,
-		this.spread = 90,
 		this.edgeFade = 40,
 		this.velocityRange = 512,
 		this.curlRange = 256,
 		this.divergenceRange = 128,
 		this.pressureRange = 128,
-		this.floatFields = 0,
+		this.floatFields = 1,
 	});
 
-	/// Velocity grid, long side in texels.
+	/// Velocity grid, long side of the scene in texels.
 	final double simResolution;
 
-	/// Dye grid cap, long side in texels; 0 keeps the snapshot's own resolution.
-	///
-	/// Unlike Dobryakov's 1024, the default is no cap: resampling the seed makes
-	/// the card pop the moment it is touched.
+	/// Dye grid cap, long side in texels; 0 keeps the scene's device resolution.
 	final double dyeResolution;
 
 	/// Jacobi sweeps of the pressure solve; the bulk of the per-frame passes.
@@ -45,31 +45,31 @@ final class FluidConfig {
 	/// Vorticity confinement strength.
 	final double curl;
 
-	/// Dye lost per second.
+	/// Dye lost per second where the flow is at [dissipationSpeed] or faster.
 	final double densityDissipation;
 
-	/// Velocity lost per second.
+	/// Velocity lost per second; the solver's stand-in for viscosity.
 	final double velocityDissipation;
 
-	/// Gaussian falloff of a splat, in hundredths of the grid's uv.
+	/// Flow speed of full dye decay, logical px/s; still dye never fades.
+	final double dissipationSpeed;
+
+	/// Radius where a splat's velocity falls to 1/e, logical px.
 	final double splatRadius;
 
-	/// Velocity added per unit of finger travel in uv.
+	/// Flow speed gained per px of finger travel, 1/s; see `docs/fluid.md` §2.
 	final double splatForce;
 
-	/// Mix of Dobryakov's fake relief; above 0 the card's border picks up a rim.
+	/// Mix of Dobryakov's fake relief; above 0 a dye border picks up a rim.
 	final double shading;
 
-	/// Seconds the sim keeps running after the finger lifts.
+	/// Seconds the scene keeps running after the last finger lifts.
 	final double lifetime;
 
 	/// Seconds of global fade at the end of [lifetime].
 	final double fadeOut;
 
-	/// Margin the dye may flow into on every side of the child, logical px.
-	final double spread;
-
-	/// Fade band at the canvas border, logical px; the walls trap dye there.
+	/// Fade band at the scene border, logical px; the walls trap dye there.
 	final double edgeFade;
 
 	/// Half-width of the packed velocity range, grid texels/s.
@@ -87,6 +87,34 @@ final class FluidConfig {
 	/// Above 0.5 the sim fields use rgbaFloat32 targets and no packing at all.
 	final double floatFields;
 
+	/// Thins fast and rolls hard; a card is gone within its lifetime.
+	static const smoke = FluidConfig(densityDissipation: 1.6, curl: 36, dissipationSpeed: 160);
+
+	/// Keeps its colour: slow decay, low drag, long filaments.
+	static const ink = FluidConfig(
+		densityDissipation: 0.45,
+		curl: 44,
+		velocityDissipation: 0.1,
+		dissipationSpeed: 280,
+		lifetime: 4,
+	);
+
+	/// Viscous: motion dies quickly, so the card sags rather than explodes.
+	static const honey = FluidConfig(
+		densityDissipation: 0.7,
+		curl: 5,
+		velocityDissipation: 2.2,
+		dissipationSpeed: 110,
+		splatForce: 7,
+		lifetime: 3.5,
+	);
+
+	static FluidConfig of(FluidPreset preset) => switch (preset) {
+		FluidPreset.smoke => smoke,
+		FluidPreset.ink => ink,
+		FluidPreset.honey => honey,
+	};
+
 	FluidConfig copyWith({
 		double? simResolution,
 		double? dyeResolution,
@@ -95,12 +123,12 @@ final class FluidConfig {
 		double? curl,
 		double? densityDissipation,
 		double? velocityDissipation,
+		double? dissipationSpeed,
 		double? splatRadius,
 		double? splatForce,
 		double? shading,
 		double? lifetime,
 		double? fadeOut,
-		double? spread,
 		double? edgeFade,
 		double? velocityRange,
 		double? curlRange,
@@ -115,12 +143,12 @@ final class FluidConfig {
 		curl: curl ?? this.curl,
 		densityDissipation: densityDissipation ?? this.densityDissipation,
 		velocityDissipation: velocityDissipation ?? this.velocityDissipation,
+		dissipationSpeed: dissipationSpeed ?? this.dissipationSpeed,
 		splatRadius: splatRadius ?? this.splatRadius,
 		splatForce: splatForce ?? this.splatForce,
 		shading: shading ?? this.shading,
 		lifetime: lifetime ?? this.lifetime,
 		fadeOut: fadeOut ?? this.fadeOut,
-		spread: spread ?? this.spread,
 		edgeFade: edgeFade ?? this.edgeFade,
 		velocityRange: velocityRange ?? this.velocityRange,
 		curlRange: curlRange ?? this.curlRange,
@@ -129,31 +157,13 @@ final class FluidConfig {
 		floatFields: floatFields ?? this.floatFields,
 	);
 
-	@override
-	bool operator ==(Object other) =>
-		other is FluidConfig &&
+	/// Grid sizes are read once per effect; changing them mid-flow needs a restart.
+	bool sameGrid(FluidConfig other) =>
 		other.simResolution == simResolution &&
 		other.dyeResolution == dyeResolution &&
-		other.pressureIterations == pressureIterations &&
-		other.pressure == pressure &&
-		other.curl == curl &&
-		other.densityDissipation == densityDissipation &&
-		other.velocityDissipation == velocityDissipation &&
-		other.splatRadius == splatRadius &&
-		other.splatForce == splatForce &&
-		other.shading == shading &&
-		other.lifetime == lifetime &&
-		other.fadeOut == fadeOut &&
-		other.spread == spread &&
-		other.edgeFade == edgeFade &&
-		other.velocityRange == velocityRange &&
-		other.curlRange == curlRange &&
-		other.divergenceRange == divergenceRange &&
-		other.pressureRange == pressureRange &&
 		other.floatFields == floatFields;
 
-	@override
-	int get hashCode => Object.hash(
+	List<Object> get _fields => [
 		simResolution,
 		dyeResolution,
 		pressureIterations,
@@ -161,13 +171,24 @@ final class FluidConfig {
 		curl,
 		densityDissipation,
 		velocityDissipation,
+		dissipationSpeed,
 		splatRadius,
 		splatForce,
 		shading,
 		lifetime,
 		fadeOut,
-		spread,
 		edgeFade,
-		Object.hash(velocityRange, curlRange, divergenceRange, pressureRange, floatFields),
-	);
+		velocityRange,
+		curlRange,
+		divergenceRange,
+		pressureRange,
+		floatFields,
+	];
+
+	@override
+	bool operator ==(Object other) =>
+		other is FluidConfig && listEquals(other._fields, _fields);
+
+	@override
+	int get hashCode => Object.hashAll(_fields);
 }

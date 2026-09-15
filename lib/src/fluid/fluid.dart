@@ -1,200 +1,145 @@
 // @ai-generated(solo)
 
-import 'dart:ui' as ui;
-
-import 'package:flutter/scheduler.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
-import '../snapshot/snapshot.dart';
-import 'config.dart';
 import 'controller.dart';
-import 'solver.dart';
+import 'scene.dart';
 
-/// Turns [child] into dye of a Stable Fluids sim: solid until touched, then flow.
+/// Hands [child] to the nearest [FluidScene] as dye the moment a finger lands on it.
 class Fluid extends StatefulWidget {
 	const Fluid({
 		super.key,
 		required this.child,
-		this.config = const FluidConfig(),
 		this.controller,
-		this.onFinished,
+		this.onDismissed,
 		this.enabled = true,
 	});
 
 	final Widget child;
-	final FluidConfig config;
 
-	/// Null builds a private controller; pass one to drive the effect from outside.
+	/// Null builds a private controller; pass one to stamp or play from outside.
 	final FluidController? controller;
 
-	final VoidCallback? onFinished;
+	/// Fires once the scene's dye is gone and the child is live again.
+	final VoidCallback? onDismissed;
 
-	/// False leaves the child alone; a passed controller still drives it.
+	/// False leaves the child alone; a passed controller still stamps it.
 	final bool enabled;
 
 	@override
 	State<Fluid> createState() => _FluidState();
 }
 
-class _FluidState extends State<Fluid> with SingleTickerProviderStateMixin {
-	final ChildSnapshot _snapshot = ChildSnapshot();
-	final ValueNotifier<int> _repaint = ValueNotifier<int>(0);
+class _FluidState extends State<Fluid> {
+	final GlobalKey _boundary = GlobalKey();
 
-	late final Ticker _ticker = createTicker(_tick);
 	FluidController? _private;
-	FluidSolver? _solver;
-	Duration _last = Duration.zero;
+	FluidSceneState? _scene;
+	bool _flowing = false;
 
 	FluidController get _effect => widget.controller ?? (_private ??= FluidController());
 
 	@override
 	void initState() {
 		super.initState();
-		_applyConfig();
 		_effect.addListener(_onEffect);
-		FluidShaders.load().then((shaders) {
-			if (!mounted) {
-				shaders.dispose();
-				return;
-			}
-			setState(() => _solver = FluidSolver(shaders));
-			// The programs resolve a few frames in; a gesture may already be running.
-			_onEffect();
-		});
+	}
+
+	@override
+	void didChangeDependencies() {
+		super.didChangeDependencies();
+		final scene = FluidScene.of(context);
+		assert(scene != null, 'Fluid needs a FluidScene ancestor to flow into');
+		if (scene == _scene) return;
+		if (_flowing) _scene?.detach(_onSceneEnd);
+		_scene = scene;
+		if (_flowing) scene?.attach(_onSceneEnd);
 	}
 
 	@override
 	void didUpdateWidget(Fluid oldWidget) {
 		super.didUpdateWidget(oldWidget);
-		if (oldWidget.controller != widget.controller) {
-			(oldWidget.controller ?? _private)?.removeListener(_onEffect);
-			_effect.addListener(_onEffect);
-		}
-		_applyConfig();
+		if (oldWidget.controller == widget.controller) return;
+		(oldWidget.controller ?? _private)?.removeListener(_onEffect);
+		_effect.addListener(_onEffect);
 	}
 
 	@override
 	void dispose() {
+		if (_flowing) _scene?.detach(_onSceneEnd);
 		_effect.removeListener(_onEffect);
-		_ticker.dispose();
 		_private?.dispose();
-		_snapshot.dispose();
-		final solver = _solver;
-		if (solver != null) {
-			solver.dispose();
-			solver.shaders.dispose();
-		}
-		_repaint.dispose();
 		super.dispose();
 	}
 
-	void _applyConfig() {
-		_effect
-			..lifetime = widget.config.lifetime
-			..fadeOut = widget.config.fadeOut;
-	}
-
 	void _onEffect() {
-		final solver = _solver;
-		if (solver == null) return;
-		if (!_effect.isActive) return;
-		if (_snapshot.isFrozen) return;
-		_snapshot.capture();
-		final image = _snapshot.image;
-		if (image == null) return;
-		solver.begin(image, MediaQuery.devicePixelRatioOf(context), widget.config);
-		_last = Duration.zero;
-		if (!_ticker.isActive) _ticker.start();
+		final effect = _effect;
+		if (effect.takeStamp()) _stamp();
+		final play = effect.takePlay();
+		if (play != null) _play(play);
 	}
 
-	void _tick(Duration elapsed) {
-		final solver = _solver;
-		if (solver == null || !solver.isReady) return;
-		// Dobryakov's cap: a long frame must not let advection jump a whole cell.
-		final raw = _last == Duration.zero ? 1 / 60 : (elapsed - _last).inMicroseconds / 1e6;
-		final dt = raw.clamp(1 / 1000, 1 / 60);
-		_last = elapsed;
+	void _onDown(PointerDownEvent event) {
+		if (widget.enabled) _stamp();
+	}
 
-		solver.beginFrame();
-		for (final (at, delta) in _effect.takeSplats()) {
-			solver.splat(at, delta);
+	Rect? _stamp() {
+		final scene = _scene;
+		if (scene == null || _flowing || !scene.canStamp) return null;
+		final box = _boundary.currentContext?.findRenderObject();
+		// toImageSync throws on a boundary that has never painted.
+		if (box is! RenderRepaintBoundary || !box.hasSize) return null;
+		final rect = scene.rectOf(box);
+		if (rect == null) return null;
+		final image = box.toImageSync(pixelRatio: scene.devicePixelRatio);
+		if (!scene.stamp(image, rect)) {
+			image.dispose();
+			return null;
 		}
-		solver.step(dt);
-		_effect.passes = solver.passes;
-		final alive = _effect.advance(dt);
-		_repaint.value++;
-		if (alive) return;
-		_finish();
+		scene.attach(_onSceneEnd);
+		setState(() => _flowing = true);
+		_effect.report(FluidStatus.flowing);
+		return rect;
 	}
 
-	void _finish() {
-		_ticker.stop();
-		_solver?.end();
-		_snapshot.release();
-		widget.onFinished?.call();
+	void _play(({Offset? direction, Offset? origin, double speed}) request) {
+		final scene = _scene;
+		final box = _box();
+		final rect = _stamp() ?? (box == null ? null : scene?.rectOf(box));
+		if (scene == null || rect == null) return;
+		final direction = request.direction ?? const Offset(1, 1);
+		final unit = direction.distance > 1e-3 ? direction / direction.distance : const Offset(1, 0);
+		final length = Offset(rect.width, rect.height).distance;
+		final from = request.origin != null
+			? rect.topLeft + request.origin!
+			: rect.center - unit * (length / 2);
+		scene.controller.stroke(FluidStroke(from: from, to: from + unit * length, speed: request.speed));
 	}
 
-	ChildSnapshotPainter _painter(ui.Image snapshot, double spread) => _FluidPainter(
-		snapshot: snapshot,
-		spread: spread,
-		solver: _solver,
-		effect: _effect,
-		repaint: _repaint,
-	);
+	RenderBox? _box() {
+		final box = _boundary.currentContext?.findRenderObject();
+		return box is RenderBox ? box : null;
+	}
 
-	void _onStart(DragStartDetails details) => _effect.begin(details.localPosition);
-
-	void _onUpdate(DragUpdateDetails details) => _effect.move(details.localPosition);
-
-	void _onEnd(DragEndDetails details) => _effect.end();
+	void _onSceneEnd() {
+		if (!mounted) return;
+		setState(() => _flowing = false);
+		_effect.report(FluidStatus.dismissed);
+		widget.onDismissed?.call();
+	}
 
 	@override
 	Widget build(BuildContext context) {
-		final host = SnapshotHost(
-			controller: _snapshot,
-			spread: widget.config.spread,
-			painterBuilder: _painter,
-			child: widget.child,
-		);
-		if (!widget.enabled) return host;
-		return GestureDetector(
-			onPanStart: _onStart,
-			onPanUpdate: _onUpdate,
-			onPanEnd: _onEnd,
-			onPanCancel: _effect.end,
-			child: host,
+		return Listener(
+			onPointerDown: _onDown,
+			child: Visibility(
+				visible: !_flowing,
+				maintainSize: true,
+				maintainAnimation: true,
+				maintainState: true,
+				child: RepaintBoundary(key: _boundary, child: widget.child),
+			),
 		);
 	}
-}
-
-class _FluidPainter extends ChildSnapshotPainter {
-	_FluidPainter({
-		required super.snapshot,
-		required super.spread,
-		required this.solver,
-		required this.effect,
-		required Listenable repaint,
-	}) : super(repaint: repaint);
-
-	final FluidSolver? solver;
-	final FluidController effect;
-
-	@override
-	void paint(Canvas canvas, Size size) {
-		final solver = this.solver;
-		if (solver == null || !solver.isReady) {
-			// A frame or two before the programs resolve, or after the sim is torn down.
-			canvas.drawImageRect(
-				snapshot,
-				Rect.fromLTWH(0, 0, snapshot.width.toDouble(), snapshot.height.toDouble()),
-				childRect(size),
-				Paint(),
-			);
-			return;
-		}
-		solver.paint(canvas, size, effect.opacity);
-	}
-
-	@override
-	bool shouldRepaint(_FluidPainter old) => old.solver != solver || old.snapshot != snapshot;
 }

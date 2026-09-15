@@ -4,66 +4,141 @@ import 'dart:ui' show Offset;
 
 import 'package:flutter/foundation.dart';
 
-enum FluidStatus { idle, touching, settling }
+/// Where one [FluidScene] is in its life; the scene owns the GPU and the clock.
+enum FluidSceneStatus { idle, touching, settling }
 
-/// Input and lifetime of one fluid effect; the widget owns the GPU and the clock.
-class FluidController extends ChangeNotifier {
+/// Where one `Fluid` child is; a stamped child is dye, not a widget.
+enum FluidStatus { idle, flowing, dismissed }
+
+/// A scripted finger, in scene-local logical px; `play` and debug hooks use it.
+class FluidStroke {
+	FluidStroke({required this.from, required this.to, this.speed = 900});
+
+	final Offset from;
+	final Offset to;
+
+	/// Travel along the path, logical px/s.
+	final double speed;
+
+	double _travelled = 0;
+
+	double get _length => (to - from).distance;
+
+	bool get _done => _travelled >= _length;
+
+	Offset get _at => _length <= 0 ? from : Offset.lerp(from, to, _travelled / _length)!;
+
+	/// Walks the finger by [dt] and returns the travel since the last step.
+	(Offset, Offset) _step(double dt) {
+		final was = _at;
+		_travelled = (_travelled + speed * dt).clamp(0.0, _length);
+		final at = _at;
+		return (at, at - was);
+	}
+}
+
+/// Input and lifetime of one fluid scene; the scene widget owns the GPU and the clock.
+class FluidSceneController extends ChangeNotifier {
 	final List<(Offset, Offset)> _splats = <(Offset, Offset)>[];
+	final Map<int, Offset> _pointers = <int, Offset>{};
+	final List<FluidStroke> _strokes = <FluidStroke>[];
 
-	Offset? _last;
-	FluidStatus _status = FluidStatus.idle;
+	FluidSceneStatus _status = FluidSceneStatus.idle;
 	double _settled = 0;
+	double _opacity = 1;
+	bool _frozen = false;
 
-	/// Seconds the sim keeps running after the finger lifts; set from the config.
+	/// Seconds the scene keeps running after the last finger lifts; set from the config.
 	double lifetime = 3;
 
 	/// Seconds of global fade at the end of [lifetime].
 	double fadeOut = 1;
 
-	/// Passes the solver recorded in the last frame; reported by the widget.
+	/// Passes the solver recorded in the last frame; reported by the scene.
 	int passes = 0;
 
-	FluidStatus get status => _status;
-	bool get isActive => _status != FluidStatus.idle;
+	/// `ui.Image`s the solver holds; reported by the scene.
+	int liveImages = 0;
 
-	double get opacity {
-		if (_status != FluidStatus.settling || fadeOut <= 0) return 1;
+	FluidSceneStatus get status => _status;
+	bool get isActive => _status != FluidSceneStatus.idle;
+
+	/// Seconds since the last finger lifted; it does not run while one is down.
+	double get settled => _settled;
+
+	/// Debug hold: the sim keeps stepping but the clock never reaches [lifetime].
+	bool get isFrozen => _frozen;
+
+	/// Rate-limited, so a stamp during the tail brings the dye back without a cut.
+	double get opacity => _opacity;
+
+	double get _targetOpacity {
+		if (_status != FluidSceneStatus.settling || fadeOut <= 0) return 1;
 		final tail = lifetime - fadeOut;
 		if (_settled <= tail) return 1;
 		return (1 - (_settled - tail) / fadeOut).clamp(0.0, 1.0);
 	}
 
-	void begin(Offset at) {
-		_splats.clear();
-		_last = at;
+	/// A fresh stamp restarts the clock; the new dye gets a full lifetime.
+	void wake() {
 		_settled = 0;
-		_status = FluidStatus.touching;
+		if (_status == FluidSceneStatus.idle) _status = _touching ? FluidSceneStatus.touching : FluidSceneStatus.settling;
+		notifyListeners();
+	}
+
+	bool get _touching => _pointers.isNotEmpty || _strokes.isNotEmpty;
+
+	void down(int pointer, Offset at) {
+		_pointers[pointer] = at;
+		_status = FluidSceneStatus.touching;
 		notifyListeners();
 	}
 
 	/// Queues a velocity splat; the force follows the travel since the last move.
-	void move(Offset at) {
-		final delta = at - (_last ?? at);
-		_last = at;
-		_status = FluidStatus.touching;
-		if (delta == Offset.zero) return;
-		_splats.add((at, delta));
+	void moveTo(int pointer, Offset at) {
+		final last = _pointers[pointer];
+		_pointers[pointer] = at;
+		_status = FluidSceneStatus.touching;
+		if (last == null || at == last) return;
+		_splats.add((at, at - last));
 		notifyListeners();
 	}
 
-	void end() {
-		if (_status != FluidStatus.touching) return;
-		_last = null;
-		_settled = 0;
-		_status = FluidStatus.settling;
+	void up(int pointer) {
+		if (_pointers.remove(pointer) == null) return;
+		if (!_touching && _status == FluidSceneStatus.touching) _status = FluidSceneStatus.settling;
+		notifyListeners();
+	}
+
+	/// Runs a synthetic finger along a path; the scene's ticker walks it.
+	void stroke(FluidStroke stroke) {
+		_strokes.add(stroke);
+		_status = FluidSceneStatus.touching;
+		notifyListeners();
+	}
+
+	/// Debug entry point: parks the settle clock at [seconds] and holds it there.
+	void freeze(double seconds) {
+		_frozen = true;
+		_settled = seconds < 0 ? 0 : seconds;
+		if (_status == FluidSceneStatus.idle) _status = FluidSceneStatus.settling;
+		notifyListeners();
+	}
+
+	void resume() {
+		if (!_frozen) return;
+		_frozen = false;
 		notifyListeners();
 	}
 
 	void reset() {
 		_splats.clear();
-		_last = null;
+		_pointers.clear();
+		_strokes.clear();
+		_frozen = false;
 		_settled = 0;
-		_status = FluidStatus.idle;
+		_opacity = 1;
+		_status = FluidSceneStatus.idle;
 		notifyListeners();
 	}
 
@@ -74,12 +149,79 @@ class FluidController extends ChangeNotifier {
 		return taken;
 	}
 
-	/// Ages the post-touch clock; false once the effect is over.
+	/// Walks scripted strokes and ages the clock; false once the scene is over.
 	bool advance(double dt) {
-		if (_status != FluidStatus.settling) return _status != FluidStatus.idle;
-		_settled += dt;
+		_stepStrokes(dt);
+		if (!_frozen && _status == FluidSceneStatus.settling) _settled += dt;
+		_slewOpacity(dt);
+		if (_frozen || _status != FluidSceneStatus.settling) return _status != FluidSceneStatus.idle;
 		if (_settled < lifetime) return true;
 		reset();
 		return false;
+	}
+
+	// The fade's own slope is the limit, so fading is exact and recovery mirrors it.
+	void _slewOpacity(double dt) {
+		final step = fadeOut > 0 ? dt / fadeOut : 1.0;
+		_opacity = (_opacity + (_targetOpacity - _opacity).clamp(-step, step)).clamp(0.0, 1.0);
+	}
+
+	void _stepStrokes(double dt) {
+		if (_strokes.isEmpty) return;
+		for (final stroke in _strokes) {
+			final (at, delta) = stroke._step(dt);
+			if (delta != Offset.zero) _splats.add((at, delta));
+		}
+		_strokes.removeWhere((stroke) => stroke._done);
+		if (!_touching && _status == FluidSceneStatus.touching) _status = FluidSceneStatus.settling;
+	}
+}
+
+/// Handle on one `Fluid` child: stamp it into the scene, or play a stroke over it.
+class FluidController extends ChangeNotifier {
+	FluidStatus _status = FluidStatus.idle;
+	({Offset? direction, Offset? origin, double speed})? _request;
+	bool _wantsStamp = false;
+
+	FluidStatus get status => _status;
+	bool get isFlowing => _status == FluidStatus.flowing;
+
+	/// Hands the child to the scene as dye right now, with no velocity.
+	void stamp() {
+		_wantsStamp = true;
+		notifyListeners();
+	}
+
+	/// Stamps the child and drags a synthetic finger across it, child-local px.
+	void play({Offset? direction, Offset? origin, double speed = 900}) {
+		_wantsStamp = true;
+		_request = (direction: direction, origin: origin, speed: speed);
+		notifyListeners();
+	}
+
+	void reset() {
+		_wantsStamp = false;
+		_request = null;
+		_status = FluidStatus.idle;
+		notifyListeners();
+	}
+
+	/// Set by the widget; the scene decides when a child starts flowing and ends.
+	void report(FluidStatus status) {
+		if (status == _status) return;
+		_status = status;
+		notifyListeners();
+	}
+
+	bool takeStamp() {
+		final wanted = _wantsStamp;
+		_wantsStamp = false;
+		return wanted;
+	}
+
+	({Offset? direction, Offset? origin, double speed})? takePlay() {
+		final request = _request;
+		_request = null;
+		return request;
 	}
 }

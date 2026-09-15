@@ -12,6 +12,7 @@ abstract final class _U {
 
 	static const advTexel = 2, advSourceTexel = 4, advDt = 6;
 	static const advDissipation = 7, advVector = 8, advVelCode = 9, advSourceCode = 11;
+	static const advSpeedRef = 13;
 
 	static const curlTexel = 2, curlVelCode = 4, curlCurlCode = 6;
 
@@ -82,7 +83,7 @@ class FluidShaders {
 	}
 }
 
-/// Stable Fluids on ping-ponged `toImageSync` targets; dye is a widget snapshot.
+/// Stable Fluids over one scene-wide field; widget snapshots are stamped in as dye.
 class FluidSolver {
 	FluidSolver(this.shaders);
 
@@ -95,7 +96,9 @@ class FluidSolver {
 	FluidConfig _config = const FluidConfig();
 	ui.Image? _curl;
 	ui.Image? _divergence;
-	ui.Size _canvas = ui.Size.zero;
+	ui.Size _scene = ui.Size.zero;
+	double _dpr = 1;
+	double _dyeScale = 1;
 	int _dyeW = 0;
 	int _dyeH = 0;
 	int _simW = 0;
@@ -103,16 +106,26 @@ class FluidSolver {
 	int _passes = 0;
 
 	bool get isReady => !_dye.isEmpty;
-	ui.Image get dye => _dye.image;
 
-	/// Card plus the spread margin, logical px; the painter's canvas.
-	ui.Size get canvasSize => _canvas;
+	/// The domain, logical px; every stamp and splat is in these coordinates.
+	ui.Size get sceneSize => _scene;
+
+	double get devicePixelRatio => _dpr;
 
 	/// Passes recorded since the last [beginFrame].
 	int get passes => _passes;
 
 	ui.Size get simSize => ui.Size(_simW.toDouble(), _simH.toDouble());
 	ui.Size get dyeSize => ui.Size(_dyeW.toDouble(), _dyeH.toDouble());
+
+	/// Images the solver holds: live fields plus the ones waiting to be freed.
+	int get liveImages =>
+		_runner.pending +
+		(_dye.isEmpty ? 0 : 1) +
+		(_velocity.isEmpty ? 0 : 1) +
+		(_pressure.isEmpty ? 0 : 1) +
+		(_curl == null ? 0 : 1) +
+		(_divergence == null ? 0 : 1);
 
 	bool get _float => _config.floatFields > 0.5;
 
@@ -123,25 +136,28 @@ class FluidSolver {
 	(double, double) _code(double range) =>
 		_float ? (1, 0) : (1 / (2 * math.max(range, 1e-3)), 128 / 255);
 
-	/// Seeds the dye from [snapshot] and clears the sim; sizes follow the snapshot.
-	void begin(ui.Image snapshot, double devicePixelRatio, FluidConfig config) {
+	/// Grid texels per logical px; the grids are proportional to the scene, so one scale.
+	double get _texelsPerPx => _scene.height > 0 ? _simH / _scene.height : 0;
+
+	/// Allocates an empty field over [scene]; grid-size knobs are read here and only here.
+	void begin(ui.Size scene, double devicePixelRatio, FluidConfig config) {
 		_config = config;
-		final margin = (config.spread * devicePixelRatio).round();
-		final fullW = snapshot.width + 2 * margin;
-		final fullH = snapshot.height + 2 * margin;
-		_canvas = ui.Size(fullW / devicePixelRatio, fullH / devicePixelRatio);
+		_scene = scene;
+		_dpr = devicePixelRatio;
+		final fullW = math.max(2, (scene.width * devicePixelRatio).round());
+		final fullH = math.max(2, (scene.height * devicePixelRatio).round());
 
 		final cap = config.dyeResolution.round();
 		final long = math.max(fullW, fullH);
-		final scale = cap > 0 && long > cap ? cap / long : 1.0;
-		_dyeW = math.max(2, (fullW * scale).round());
-		_dyeH = math.max(2, (fullH * scale).round());
+		_dyeScale = cap > 0 && long > cap ? cap / long : 1.0;
+		_dyeW = math.max(2, (fullW * _dyeScale).round());
+		_dyeH = math.max(2, (fullH * _dyeScale).round());
 
-		final sim = config.simResolution.round();
+		final sim = math.max(2, config.simResolution.round());
 		_simW = math.max(2, (sim * fullW / long).round());
 		_simH = math.max(2, (sim * fullH / long).round());
 
-		_dye.swap(_seedDye(snapshot, margin * scale, scale), _runner);
+		_dye.swap(_runner.rasterize(_dyeW, _dyeH, (_) {}), _runner);
 		_velocity.swap(_zeroField(), _runner);
 		_pressure.swap(_zeroField(), _runner);
 		_runner.retire(_curl);
@@ -149,6 +165,9 @@ class FluidSolver {
 		_curl = null;
 		_divergence = null;
 	}
+
+	/// Live knobs; grid sizes stay as [begin] left them until the next effect.
+	void adopt(FluidConfig config) => _config = config;
 
 	void end() {
 		_dye.clear(_runner);
@@ -167,23 +186,49 @@ class FluidSolver {
 		_passes = 0;
 	}
 
-	/// [at] and [delta] are child-local logical px; the force follows the travel.
+	/// Composites [snapshot] into the dye at [rect], scene-local logical px.
+	void stamp(ui.Image snapshot, ui.Rect rect) {
+		if (_dye.isEmpty) return;
+		// Whole device pixels, or the stamp resamples and the card pops the moment it flows.
+		final left = (rect.left * _dpr).roundToDouble() * _dyeScale;
+		final top = (rect.top * _dpr).roundToDouble() * _dyeScale;
+		final src = ui.Rect.fromLTWH(0, 0, snapshot.width.toDouble(), snapshot.height.toDouble());
+		final dst = ui.Rect.fromLTWH(left, top, snapshot.width * _dyeScale, snapshot.height * _dyeScale);
+		final previous = _dye.image;
+		_dye.swap(
+			_runner.rasterize(_dyeW, _dyeH, (canvas) {
+				canvas.drawImage(
+					previous,
+					ui.Offset.zero,
+					ui.Paint()
+						..blendMode = ui.BlendMode.src
+						..isAntiAlias = false,
+				);
+				canvas.drawImageRect(
+					snapshot,
+					src,
+					dst,
+					ui.Paint()
+						// Nearest at scale 1 keeps the stamp byte-identical to the child.
+						..filterQuality = _dyeScale == 1 ? ui.FilterQuality.none : ui.FilterQuality.medium
+						..isAntiAlias = false,
+				);
+			}),
+			_runner,
+		);
+		// toImageSync rasterises lazily, so the caller must not free the snapshot itself.
+		_runner.retire(snapshot);
+		_passes++;
+	}
+
+	/// [at] and [delta] are scene-local logical px; [delta] is the travel since the last splat.
 	void splat(ui.Offset at, ui.Offset delta) {
 		if (_velocity.isEmpty) return;
-		final point = ui.Offset(
-			(at.dx + _config.spread) / _canvas.width,
-			(at.dy + _config.spread) / _canvas.height,
-		);
+		final point = ui.Offset(at.dx / _scene.width, at.dy / _scene.height);
 		final aspect = _simW / _simH;
-		var dx = delta.dx / _canvas.width;
-		var dy = delta.dy / _canvas.height;
-		// Dobryakov's correctDelta: a splat stays round on a non-square grid.
-		if (aspect < 1) {
-			dx *= aspect;
-		} else {
-			dy /= aspect;
-		}
-		final radius = _config.splatRadius / 100 * (aspect > 1 ? aspect : 1);
+		// splatForce is 1/s: px/s of flow gained per px of finger travel, size-independent.
+		final gain = _config.splatForce * _texelsPerPx;
+		final radius = _config.splatRadius / math.max(_scene.height, 1);
 		final code = _code(_config.velocityRange);
 
 		final shader = shaders.splat;
@@ -192,9 +237,9 @@ class FluidSolver {
 			..setFloat(_U.resolution + 1, _simH.toDouble())
 			..setFloat(_U.splatPoint, point.dx)
 			..setFloat(_U.splatPoint + 1, point.dy)
-			..setFloat(_U.splatForce, dx * _config.splatForce)
-			..setFloat(_U.splatForce + 1, dy * _config.splatForce)
-			..setFloat(_U.splatRadius, radius)
+			..setFloat(_U.splatForce, delta.dx * gain)
+			..setFloat(_U.splatForce + 1, delta.dy * gain)
+			..setFloat(_U.splatRadius, math.max(radius * radius, 1e-9))
 			..setFloat(_U.splatAspect, aspect)
 			..setFloat(_U.splatVelCode, code.$1)
 			..setFloat(_U.splatVelCode + 1, code.$2)
@@ -314,7 +359,7 @@ class FluidSolver {
 
 	void _advectVelocity(ui.Offset texel, double dt, (double, double) vel) {
 		final shader = shaders.advection;
-		_writeAdvection(shader, texel, texel, dt, _config.velocityDissipation, 1, vel, vel);
+		_writeAdvection(shader, texel, texel, dt, _config.velocityDissipation, 1, 0, vel, vel);
 		shader
 			..setFloat(_U.resolution, _simW.toDouble())
 			..setFloat(_U.resolution + 1, _simH.toDouble())
@@ -334,6 +379,7 @@ class FluidSolver {
 			dt,
 			_config.densityDissipation,
 			0,
+			_config.dissipationSpeed * _texelsPerPx,
 			vel,
 			(1, 0),
 		);
@@ -353,6 +399,7 @@ class FluidSolver {
 		double dt,
 		double dissipation,
 		double vector,
+		double speedRef,
 		(double, double) vel,
 		(double, double) source,
 	) {
@@ -367,7 +414,8 @@ class FluidSolver {
 			..setFloat(_U.advVelCode, vel.$1)
 			..setFloat(_U.advVelCode + 1, vel.$2)
 			..setFloat(_U.advSourceCode, source.$1)
-			..setFloat(_U.advSourceCode + 1, source.$2);
+			..setFloat(_U.advSourceCode + 1, source.$2)
+			..setFloat(_U.advSpeedRef, speedRef);
 	}
 
 	/// Paints the dye over [size]; the caller owns the canvas and its transform.
@@ -389,22 +437,6 @@ class FluidSolver {
 				..shader = shader
 				..isAntiAlias = false,
 		);
-	}
-
-	ui.Image _seedDye(ui.Image snapshot, double margin, double scale) {
-		final src = ui.Rect.fromLTWH(0, 0, snapshot.width.toDouble(), snapshot.height.toDouble());
-		final dst = ui.Rect.fromLTWH(margin, margin, snapshot.width * scale, snapshot.height * scale);
-		return _runner.rasterize(_dyeW, _dyeH, (canvas) {
-			canvas.drawImageRect(
-				snapshot,
-				src,
-				dst,
-				ui.Paint()
-					// Nearest at scale 1 keeps the frozen card byte-identical to the child.
-					..filterQuality = scale == 1 ? ui.FilterQuality.none : ui.FilterQuality.medium
-					..isAntiAlias = false,
-			);
-		});
 	}
 
 	ui.Image _zeroField() {

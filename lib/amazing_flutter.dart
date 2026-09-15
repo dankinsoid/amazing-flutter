@@ -6,6 +6,7 @@ export 'src/fluid/config.dart';
 export 'src/fluid/controller.dart';
 export 'src/fluid/fluid.dart';
 export 'src/fluid/passes.dart';
+export 'src/fluid/scene.dart';
 export 'src/fluid/solver.dart';
 export 'src/liquid_glass/liquid_glass.dart';
 export 'src/liquid_glass/material.dart';

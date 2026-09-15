@@ -66,10 +66,18 @@ Each step exists to unblock the next, not because it is the prettiest.
 | self-contained | plain `FragmentShader` | holographic, aurora, metaballs |
 | over a child snapshot | `toImageSync` / sampler | fold, page curl, genie, disintegration |
 | over the backdrop | `ImageFilter.shader` + `BackdropGroup` | glass, progressive blur, water |
+| multi-pass ping-pong | `toImageSync` chain, `lib/src/fluid/passes.dart` | fluid, any iterative solve |
 
-The third is Impeller-only and needs a fallback path — guard with
+The backdrop primitive is Impeller-only and needs a fallback path — guard with
 `ui.ImageFilter.isShaderFilterSupported`. On GLES the Y axis is flipped and the
 shader must invert it.
+
+The multi-pass primitive is `PassRunner` + `Field`, and it knows nothing about
+fluids: set uniforms, record a full-target `drawRect`, `toImageSync`, feed the
+image to the next pass. It has no ping-pong *pair* — every pass allocates its own
+target and the old one is retired a frame late, because `toImageSync` rasterises
+lazily. Anything iterative (a Poisson solve, a mip pyramid, a blur chain) belongs
+on it. Details and its cost model: `docs/fluid.md` §8.
 
 **2. Holographic card.** Self-contained, zero infrastructure, best
 wow-to-effort ratio in the whole survey — and the only effect that *requires* a
@@ -99,6 +107,25 @@ After that, in rough order: fluted glass (one height function on working glass �
 proves the architecture), liquid metal (reflect a matcap instead of refracting),
 rubber-band pull, disintegration (one shader, three modes: Thanos / smoke /
 blow-away), genie, god rays behind live text input, caustics.
+
+**Dissolving a widget: fluid is the flagship, erode is the cheap fallback.**
+Both were built and compared. `DisintegrationMode.erode` is one pass over one
+snapshot and destroys a widget convincingly for the price of a filter; the GPU
+Stable Fluids scene is 26 passes and actually *flows* — the card is pixel-solid
+until it is touched, the dye rolls into Kelvin-Helmholtz curls, and a second
+stroke stirs what the first one left. Use erode where the budget is a single
+pass or the platform has no float render targets; use fluid where the effect is
+the point. They share the snapshot primitive and nothing else.
+
+**Done out of order: fluid, and with it the multi-pass primitive.**
+`lib/src/fluid/` is the fourth row of the table above. `FluidScene` owns one
+Stable Fluids domain over its whole subtree — **decision 1 again: one field, in
+screen coordinates, shared** — and each `Fluid` child stamps its `toImageSync`
+snapshot into that shared dye at its own screen rect when a finger lands on it.
+A per-card domain was tried first and was wrong for exactly the reason decision 1
+predicts: the card-sized walls read as a visible rectangle, smoke could not drift
+past a neighbour, and the pass count multiplied by the number of cards. Design,
+units, and the measurements: `docs/fluid.md`.
 
 **Done out of order: disintegration, and with it the snapshot primitive.**
 `lib/src/snapshot/` is now the second row of the table above: `SnapshotHost` wraps
