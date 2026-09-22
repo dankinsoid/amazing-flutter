@@ -132,6 +132,16 @@ float sdRoundBox(vec2 p, vec2 half_, float r) {
 	return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
 }
 
+// `radial-gradient(farthest-corner circle at center, ...)`: 1 at center, 0 at the
+// card corner furthest from it, then brightness/contrast so it collapses to a spot.
+float farthestGate(vec2 p, vec2 center, vec2 wide, float brightnessAmt, float contrastAmt) {
+	vec2 farCorner = wide * vec2(center.x < 0.0 ? 1.0 : -1.0, center.y < 0.0 ? 1.0 : -1.0);
+	float farDist = length(farCorner - center * wide);
+	float dist = length((p - center) * wide);
+	float gate = clamp(1.0 - dist / max(farDist, 1e-3), 0.0, 1.0) * brightnessAmt;
+	return clamp((gate - 0.5) * contrastAmt + 0.5, 0.0, 1.0);
+}
+
 // One glinting cell per `cellPx` square: a hashed dot that lights when the tilt
 // phase sweeps past it, so tilting changes *which* sparkles are on.
 float sparkle(vec2 frag, float cellPx, float density, float phase, float seed) {
@@ -177,19 +187,29 @@ void main() {
 	float fromCentre = clamp(length(uPointer), 0.0, 1.0);
 	float tiltAmount = clamp(length(uTilt), 0.0, 1.0);
 
-	// The rainbow sweeps because the tilt shifts the phase, as --background-position does on the site.
+	// The rainbow sweeps because the tilt shifts the phase, as --background-position does on the
+	// site — scaled up 3x (the site moves a 400% background by factors 2.6/3.5 of the pointer) so
+	// a tilt sweeps several periods of the spectrum instead of nudging it within one.
 	float band = dot(p * wide, normalize(vec2(0.94, 0.34))) * uBandScale
-		+ dot(uTilt, vec2(1.60, 1.10))
+		+ dot(uTilt, vec2(4.80, 3.30))
 		+ tiltAmount * 0.55
 		+ uSeed * 0.37;
 
 	float glint = dot(uTilt, vec2(5.3, 3.7)) + uSeed;
 
+	// Same n·h light term, split into a broad weight and a tight one: the substrate takes the
+	// broad reflectance and stays dull off-axis, the ornament takes the tight one and only flares
+	// right where the lobe faces the eye — never both loud in the same place.
+	float substrateLight = 0.20 + 0.55 * nh * nh;
+	float ornamentLight = pow(nh, SHININESS);
+
 	vec3 foil;
 	if (isPattern(PATTERN_REVERSE)) {
-		// Thin repeating lines, the etched look, with the foil grain glittering between them.
+		// The etched ridges are the ornament on a duller foil substrate, not the whole pattern.
 		float ridge = pow(1.0 - abs(fract(band * 2.0) * 2.0 - 1.0), 5.0);
-		foil = palette(band * 0.45 + 0.10) * (0.30 + 1.50 * ridge);
+		vec3 substrateColor = palette(band * 0.45 + 0.10) * substrateLight;
+		vec3 ornamentColor = palette(band * 0.45 + 0.10) * (0.35 + 1.70 * ornamentLight);
+		foil = mix(substrateColor, ornamentColor, ridge);
 		foil += vec3(1.0, 0.96, 0.88) * sparkle(frag, 5.0, 0.55, glint * 1.6, uSeed) * 1.4;
 		foil = saturate(contrast(foil, 1.55), 1.10);
 	} else if (isPattern(PATTERN_GALAXY)) {
@@ -200,22 +220,28 @@ void main() {
 		foil += vec3(0.75, 0.85, 1.0) * sparkle(frag, 17.0, 0.40, glint * 1.3 + 2.0, uSeed + 23.0) * 1.3;
 		foil = saturate(contrast(foil, 1.20), 1.05);
 	} else {
-		// Classic: wide diagonal bands over a fine grating, the 110deg rainbow of the site.
-		float grating = 0.5 + 0.5 * cos(frag.y * 0.85);
-		foil = palette(band) * mix(0.90, 1.10, grating);
+		// Classic: a rainbow substrate under a fine grating ornament, the bars of the site's shine.
+		float bars = pow(0.5 + 0.5 * cos(frag.y * 0.85), 8.0);
+		vec3 substrateColor = palette(band) * substrateLight;
+		vec3 ornamentColor = palette(band) * (0.35 + 1.60 * ornamentLight);
+		foil = mix(substrateColor, ornamentColor, bars);
 		foil = saturate(contrast(foil, 1.85), 0.85);
 	}
 
 	// Grain breaks the sheet up; it belongs to the foil, so a card at rest stays clean.
 	float grain = mix(1.0, 0.55 + 0.90 * hash12(floor(frag * 1.5) + uSeed * 31.0), uGrain);
 
+	// The site gates its rainbow with a `luminosity` radial under `brightness(.6) contrast(4)` so
+	// the foil only lives near the light; without it the pattern reads as stripes over the whole card.
+	float rainbowGate = farthestGate(p, uPointer, wide, 0.6, 4.0);
+
 	float amount = clamp(uPointerStrength, 0.0, 1.0);
-	float foilAmount = uFoil * mask * amount * grain * light * (0.75 + 0.45 * fromCentre);
+	float foilAmount = uFoil * mask * amount * grain * light * rainbowGate * (0.75 + 0.45 * fromCentre);
 
 	vec3 col = foilBlend(base, clamp(foil * foilAmount, 0.0, 1.0));
 
-	// Overlay glare: above 0.5 it lifts, below it sinks, so the card darkens away from the pointer.
-	float blob = smoothstep(1.35, 0.02, length((p - uPointer) * wide));
+	// A compact circular highlight, not a wash: the site's farthest-corner glare under brightness(.6) contrast(3).
+	float blob = farthestGate(p, uPointer, wide, 0.6, 3.0);
 	vec3 glareCol = vec3(mix(0.20, 0.97, blob));
 	col = mix(col, overlayBlend(col, glareCol), uGlare * amount);
 

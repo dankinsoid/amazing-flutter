@@ -113,7 +113,7 @@ have turned a 15-float block into a 25-float one for knobs nobody turns.
 
 ## 5. The foil, and why it is not a gradient
 
-Four terms, in order.
+Five terms, in order.
 
 **The surface normal.** `n = normalize(vec3(−uTilt · TILT_ANGLE, 1))`. Tilting
 the right edge toward the viewer swings the normal to the left; that one line is
@@ -124,28 +124,49 @@ the eye `VIEW_DIST` above the card, both in half-card units, so the half vector
 `h` varies *across* the card and not just with the tilt. The foil brightness is
 `0.22 + 0.55·(n·h)² + 1.15·(n·h)^14` — a broad lobe to carry the sheet and a
 tight one for the place that actually faces the light. Without the wide term the
-card is black outside a dot; without the tight one it is a flat wash.
+card is black outside a dot; without the tight one it is a flat wash. Classic and
+reverse split the same `n·h` into a broad weight (`0.20 + 0.55·(n·h)²`) for the
+substrate and a tight one (`(n·h)^14`) for the ornament laid over it — one
+normal, two reflectances, never a second lobe computed for the ornament alone.
 
-**The phase.** `band = dot(p, dir)·uBandScale + dot(uTilt, (1.6, 1.1)) +
+**The phase.** `band = dot(p, dir)·uBandScale + dot(uTilt, (4.8, 3.3)) +
 |uTilt|·0.55 + uSeed·0.37`. The second term is the sweep — the site's
-`background-position` bound to the pointer, here bound to the tilt. The third is
-the thin-film term: interference colour depends on the *angle* through the film,
-which is isotropic, so the hue shifts with tilt magnitude on top of the
-directional sweep. Colour comes from an Inigo Quilez cosine palette, then a
-contrast and saturation curve standing in for the CSS `filter:` chain.
+`background-position` bound to the pointer, here bound to the tilt, scaled to
+match the site's 400%-background move (factors 2.6/3.5 of the pointer) so a
+tilt rolls the spectrum through several periods rather than nudging it within
+one. The third is the thin-film term: interference colour depends on the
+*angle* through the film, which is isotropic, so the hue shifts with tilt
+magnitude on top of the directional sweep. Colour comes from an Inigo Quilez
+cosine palette, then a contrast and saturation curve standing in for the CSS
+`filter:` chain.
+
+**The rainbow gate.** `farthestGate(p, uPointer, wide, 0.6, 4.0)` reproduces the
+site's `radial-gradient(farthest-corner circle at pointer, ...)` under
+`mix-blend-mode: luminosity` and `brightness(.6) contrast(4)`: 1 at the pointer,
+0 at the card corner farthest from it, then squashed through a brightness and
+contrast curve so it collapses to a spot. It multiplies straight into
+`foilAmount`, so the rainbow lives near the light and the rest of the card
+stays dark — without it classic and reverse read as stripes over the whole
+surface, since their phase term alone has no notion of *where* the light is.
 
 **The sparkles.** One hashed dot per cell: `cos(h·2π·6 + phase(tilt))` through a
 `smoothstep(0.80, 1.0)` gate, so a cell is lit only while the tilt phase sweeps
 past its own hash. Tilting changes *which* sparkles are on, which is the thing a
 static grain texture can only fake.
 
-Patterns differ only in how those four combine:
+Patterns differ only in how those five combine:
 
 | `uPattern` | Look | Extra |
 |---|---|---|
-| 0 classic | wide diagonal rainbow over a fine grating | — |
-| 1 reverse | thin repeating ridges, `pow(triangle, 5)` | 5 px sparkle grid, warm |
+| 0 classic | rainbow substrate under a fine bar-grating ornament, `pow(cos, 8)` gated | — |
+| 1 reverse | duller substrate, etched ridges as the ornament, `pow(triangle, 5)` gated | 5 px sparkle grid, warm |
 | 2 galaxy | palette riding a 3-octave FBM cloud | two sparkle grids, 7 px and 17 px |
+
+Classic and reverse both `mix(substrateColor, ornamentColor, gateMask)`: the
+substrate uses the broad reflectance and stays visible (if dull) everywhere,
+the ornament uses the tight one and only shows its own colour where the mask
+(`bars` or `ridge`) says the foil or the engraving actually is. Galaxy already
+had two reflectances — `palette()` multiplied by `fbm` — so it is unchanged.
 
 ## 6. Blending
 
@@ -158,9 +179,10 @@ result is re-multiplied at the end.
   already bright to flat white, which is what the site's
   `brightness(.85) contrast(2.75)` is there to hold back. Half a screen blend
   does the same job in one expression and keeps a gradient in the highlights.
-- **Glare** — an overlay of a white blob at the pointer, over a 0.20 floor, so
-  the card lifts near the pointer and sinks away from it exactly as the CSS
-  radial gradient from `hsla(0,0%,100%,.8)` to `hsla(0,0%,0%,.5)` does.
+- **Glare** — an overlay of `farthestGate(p, uPointer, wide, 0.6, 3.0)`, the
+  same farthest-corner gate the rainbow uses, over a 0.20 floor: a compact,
+  high-contrast circular highlight at the pointer, not a wash across the card,
+  matching the site's `brightness(.6) contrast(3)` on its glare radial.
 - **Grain** — multiplied into the foil only, never into the card, so a card at
   rest is clean.
 
