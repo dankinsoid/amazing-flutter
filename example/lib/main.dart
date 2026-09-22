@@ -46,7 +46,7 @@ class _HomeState extends State<_Home> {
 						children: const [LiquidGlassDemo(), DisintegrationDemo(), FluidDemo(), HoloDemo()],
 					),
 				),
-				Positioned(top: 8, left: 8, child: _switcher()),
+				Positioned(top: 8, left: 8, child: SafeArea(child: _switcher())),
 			],
 		);
 	}

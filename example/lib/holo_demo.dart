@@ -50,7 +50,10 @@ class _HoloDemoState extends State<HoloDemo> with TickerProviderStateMixin {
 	double _seed = 0;
 	double _maxAngle = HoloConfig.holo.maxAngle;
 	HoloMask? _mask;
-	bool _panel = true;
+	bool? _panelOpen;
+
+	/// A phone has no room beside a 260px panel; it starts closed there.
+	bool get _panel => _panelOpen ?? MediaQuery.sizeOf(context).width > 700;
 	String _report = '';
 
 	static HoloConfig _presetOf(int index) => HoloConfig.of(_patterns[index]);
@@ -59,7 +62,7 @@ class _HoloDemoState extends State<HoloDemo> with TickerProviderStateMixin {
 	void initState() {
 		super.initState();
 		if (_debugTilt == null && _debugPointer == null && !_debugProfile && _debugSnapAt.isEmpty) return;
-		_panel = false;
+		_panelOpen = false;
 		// An occluded macOS window gets no frames at all, so pump from the first tick.
 		startSnapPump();
 		WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -163,13 +166,15 @@ class _HoloDemoState extends State<HoloDemo> with TickerProviderStateMixin {
 		return Stack(
 			children: [
 				Positioned.fill(child: _scene()),
-				if (_panel) Positioned(top: 0, right: 0, bottom: 0, child: _controls()),
+				if (_panel) Positioned(top: 0, right: 0, bottom: 0, child: SafeArea(child: _controls())),
 				Positioned(
 					top: 8,
 					right: _panel ? 268 : 8,
-					child: IconButton(
-						icon: Icon(_panel ? Icons.chevron_right : Icons.tune, color: Colors.white),
-						onPressed: () => setState(() => _panel = !_panel),
+					child: SafeArea(
+						child: IconButton(
+							icon: Icon(_panel ? Icons.chevron_right : Icons.tune, color: Colors.white),
+							onPressed: () => setState(() => _panelOpen = !_panel),
+						),
 					),
 				),
 				if (_report.isNotEmpty)

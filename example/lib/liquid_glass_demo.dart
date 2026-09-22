@@ -20,7 +20,10 @@ class _LiquidGlassDemoState extends State<LiquidGlassDemo> with TickerProviderSt
 	final _ripples = GlassRipples();
 	bool _dragging = false;
 	GlassMaterial _material = const GlassMaterial();
-	bool _panel = true;
+	bool? _panelOpen;
+
+	/// A phone has no room beside a 260px panel; it starts closed there.
+	bool get _panel => _panelOpen ?? MediaQuery.sizeOf(context).width > 700;
 
 	@override
 	void dispose() {
@@ -48,9 +51,11 @@ class _LiquidGlassDemoState extends State<LiquidGlassDemo> with TickerProviderSt
 				Positioned(
 					top: 8,
 					right: _panel ? 268 : 8,
-					child: IconButton(
-						icon: Icon(_panel ? Icons.chevron_right : Icons.tune, color: Colors.white),
-						onPressed: () => setState(() => _panel = !_panel),
+					child: SafeArea(
+						child: IconButton(
+							icon: Icon(_panel ? Icons.chevron_right : Icons.tune, color: Colors.white),
+							onPressed: () => setState(() => _panelOpen = !_panel),
+						),
 					),
 				),
 			],

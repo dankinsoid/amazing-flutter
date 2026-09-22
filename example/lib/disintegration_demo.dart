@@ -124,7 +124,10 @@ class _DisintegrationDemoState extends State<DisintegrationDemo> with TickerProv
 	DisintegrationConfig _config = DisintegrationConfig.shards;
 	double _frozen = 0;
 	double _angle = _debugAngle;
-	bool _panel = true;
+	bool? _panelOpen;
+
+	/// A phone has no room beside a 260px panel; it starts closed there.
+	bool get _panel => _panelOpen ?? MediaQuery.sizeOf(context).width > 700;
 
 	@override
 	void initState() {
@@ -132,7 +135,7 @@ class _DisintegrationDemoState extends State<DisintegrationDemo> with TickerProv
 		if (_debugProgress < 0 && !_debugStroke) return;
 		_mode = _debugMode;
 		_config = DisintegrationConfig.of(_debugMode);
-		_panel = false;
+		_panelOpen = false;
 		for (final effect in _effects) {
 			effect.mode = _debugMode;
 		}
@@ -260,13 +263,15 @@ class _DisintegrationDemoState extends State<DisintegrationDemo> with TickerProv
 		return Stack(
 			children: [
 				Positioned.fill(child: _sceneView()),
-				if (_panel) Positioned(top: 0, right: 0, bottom: 0, child: _controls()),
+				if (_panel) Positioned(top: 0, right: 0, bottom: 0, child: SafeArea(child: _controls())),
 				Positioned(
 					top: 8,
 					right: _panel ? 268 : 8,
-					child: IconButton(
-						icon: Icon(_panel ? Icons.chevron_right : Icons.tune, color: Colors.white),
-						onPressed: () => setState(() => _panel = !_panel),
+					child: SafeArea(
+						child: IconButton(
+							icon: Icon(_panel ? Icons.chevron_right : Icons.tune, color: Colors.white),
+							onPressed: () => setState(() => _panelOpen = !_panel),
+						),
 					),
 				),
 			],
