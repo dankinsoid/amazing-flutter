@@ -59,7 +59,7 @@ each one has a rationale in `README.md`.
 
 Each step exists to unblock the next, not because it is the prettiest.
 
-**1. Foundation — three shader primitives.**
+**1. Foundation — four shader primitives.**
 
 | Primitive | Mechanism | Used by |
 |---|---|---|
@@ -107,23 +107,34 @@ only by `SnapshotController.clear()`, an `allowSnapshotting` flip, a detach, or
 `autoresize` seeing a new size. `lib/src/snapshot/` stays the primitive for the
 other case: freezing a child *on a gesture* and hiding it.
 
-**3. Tab bar — progressive blur + glass pill.** First real use of the backdrop
-primitive, and it doubles as the skeleton of water UI. Naive `blur + alpha mask`
-does not work: it cross-fades sharp against blurred and leaves ghosting. A real
-varying radius is required.
+**3. Water UI. Done.** Glass, water rings and metaball union in one shared
+height field — decision 1 and decision 2 in working form. `smin` composes up to
+eight SDFs in `sceneSd`, ripples sum into the same height before the normal is
+taken, and the floor gets a traced shadow and a caustic crescent. Design, uniform
+layout and the open questions: `docs/liquid_glass.md`.
 
-**4. Water UI.** Glass + water + metaballs in the shared height field. `smin` is
-needed here anyway — without it two shapes intersect with a visible crease, so
-neither merging nor the collapse-into-a-pill morph works. Shader design and
-uniform layout: `docs/liquid_glass.md`, skeleton in `shaders/liquid_glass.frag`.
+Elastic bodies came with it: `lib/src/elastic/elastic_body.dart` runs a spring to
+the finger and coasts under friction, and its `ShapeDeform` drives `elasticWarp`,
+a domain warp of the *outline* inside the glass pass.
 
-**5. Fold.** The iPhone Duo target. Progress is driven by gesture, settled with a
-spring — never a fixed duration.
+**Tab bar — progressive blur + glass pill. Dropped.** It was step 3 as a vehicle
+for the backdrop primitive and a skeleton for water UI; water UI proved both
+directly and the tab bar adds nothing the demo needs. The finding stands for
+whenever it does come back: naive `blur + alpha mask` cross-fades sharp against
+blurred and ghosts, so a real varying radius is required.
+
+**4. Materials — surfaces that behave like rubber, membrane, paper and cloth.**
+The next slice. Deformation as a function of coordinate wherever possible: one
+`shaders/material.frag` with branches over a child snapshot for pull, membrane,
+fold and crumple, and a separate CPU-simulated mesh path for cloth, because
+`drawVertices` and a runtime fragment shader cannot be combined at all. Fold and
+page curl are branches of this, not a step of their own — the old step 5. Free
+niches with no Flutter package: 2D rubber-band grab, and the modal membrane.
+Classification, maths, uniform table and build order: `docs/materials.md`.
 
 After that, in rough order: fluted glass (one height function on working glass —
 proves the architecture), liquid metal (reflect a matcap instead of refracting),
-rubber-band pull, disintegration (one shader, three modes: Thanos / smoke /
-blow-away), genie, god rays behind live text input, caustics.
+genie, god rays behind live text input.
 
 **Dissolving a widget: fluid is the flagship, erode is the cheap fallback.**
 Both were built and compared. `DisintegrationMode.erode` is one pass over one
