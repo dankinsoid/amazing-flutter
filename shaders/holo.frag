@@ -48,6 +48,13 @@ const float LIGHT_HEIGHT = 0.75;  // light above the card, in half-card units
 const float VIEW_DIST = 2.40;     // viewer above the card, in half-card units
 const float SHININESS = 14.0;
 
+// Texture varies on the scale of pixels, colour on the scale of the card; these ornament
+// frequencies are fixed so they never set the colour period the way `uBandScale` does.
+const float CLASSIC_BAR_FREQ = 0.16;    // rad/px, ~39 px between bars: sparse, not a full-card screen
+const float CLASSIC_BAR_MIX = 0.55;     // the bars stay a minority blend over the substrate
+const float REVERSE_RIDGE_FREQ = 9.0;   // engraving frequency, independent of uBandScale
+const float REVERSE_RIDGE_MIX = 0.55;   // ridge contrast stays under the rainbow's
+
 bool isPattern(float pattern) {
 	return abs(uPattern - pattern) < 0.5;
 }
@@ -132,13 +139,19 @@ float sdRoundBox(vec2 p, vec2 half_, float r) {
 	return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
 }
 
-// `radial-gradient(farthest-corner circle at center, ...)`: 1 at center, 0 at the
-// card corner furthest from it, then brightness/contrast so it collapses to a spot.
-float farthestGate(vec2 p, vec2 center, vec2 wide, float brightnessAmt, float contrastAmt) {
+// `radial-gradient(farthest-corner circle at center, ...)`'s own radius: 0 at
+// center, 1 at the card corner furthest from it.
+float farthestFraction(vec2 p, vec2 center, vec2 wide) {
 	vec2 farCorner = wide * vec2(center.x < 0.0 ? 1.0 : -1.0, center.y < 0.0 ? 1.0 : -1.0);
 	float farDist = length(farCorner - center * wide);
 	float dist = length((p - center) * wide);
-	float gate = clamp(1.0 - dist / max(farDist, 1e-3), 0.0, 1.0) * brightnessAmt;
+	return clamp(dist / max(farDist, 1e-3), 0.0, 1.0);
+}
+
+// The farthest-corner field above, collapsed to a spot by brightness/contrast: 1 at
+// center, 0 past a short radius. Used where the site gates something to a small disc.
+float farthestGate(vec2 p, vec2 center, vec2 wide, float brightnessAmt, float contrastAmt) {
+	float gate = (1.0 - farthestFraction(p, center, wide)) * brightnessAmt;
 	return clamp((gate - 0.5) * contrastAmt + 0.5, 0.0, 1.0);
 }
 
@@ -189,11 +202,13 @@ void main() {
 
 	// The rainbow sweeps because the tilt shifts the phase, as --background-position does on the
 	// site — scaled up 3x (the site moves a 400% background by factors 2.6/3.5 of the pointer) so
-	// a tilt sweeps several periods of the spectrum instead of nudging it within one.
-	float band = dot(p * wide, normalize(vec2(0.94, 0.34))) * uBandScale
-		+ dot(uTilt, vec2(4.80, 3.30))
-		+ tiltAmount * 0.55
-		+ uSeed * 0.37;
+	// a tilt sweeps several periods of the spectrum instead of nudging it within one. Kept apart
+	// from the spatial term below, which is what carries `uBandScale`; texture frequencies reuse
+	// this phase for the same sweep motion but never the spatial term, so they never set the colour period.
+	float sweepPhase = dot(uTilt, vec2(4.80, 3.30)) + tiltAmount * 0.55 + uSeed * 0.37;
+	vec2 bandDir = normalize(vec2(0.94, 0.34));
+	float bandSpatial = dot(p * wide, bandDir);
+	float band = bandSpatial * uBandScale + sweepPhase;
 
 	float glint = dot(uTilt, vec2(5.3, 3.7)) + uSeed;
 
@@ -206,7 +221,9 @@ void main() {
 	vec3 foil;
 	if (isPattern(PATTERN_REVERSE)) {
 		// The etched ridges are the ornament on a duller foil substrate, not the whole pattern.
-		float ridge = pow(1.0 - abs(fract(band * 2.0) * 2.0 - 1.0), 5.0);
+		// Fixed frequency, not uBandScale: a texture is pixel-scale, the colour it sits on is not.
+		float ridgeCoord = bandSpatial * REVERSE_RIDGE_FREQ + sweepPhase;
+		float ridge = pow(1.0 - abs(fract(ridgeCoord * 2.0) * 2.0 - 1.0), 5.0) * REVERSE_RIDGE_MIX;
 		vec3 substrateColor = palette(band * 0.45 + 0.10) * substrateLight;
 		vec3 ornamentColor = palette(band * 0.45 + 0.10) * (0.35 + 1.70 * ornamentLight);
 		foil = mix(substrateColor, ornamentColor, ridge);
@@ -220,23 +237,29 @@ void main() {
 		foil += vec3(0.75, 0.85, 1.0) * sparkle(frag, 17.0, 0.40, glint * 1.3 + 2.0, uSeed + 23.0) * 1.3;
 		foil = saturate(contrast(foil, 1.20), 1.05);
 	} else {
-		// Classic: a rainbow substrate under a fine grating ornament, the bars of the site's shine.
-		float bars = pow(0.5 + 0.5 * cos(frag.y * 0.85), 8.0);
+		// Classic: a rainbow substrate under sparse bars as the ornament, not a full-card screen.
+		float bars = pow(0.5 + 0.5 * cos(frag.y * CLASSIC_BAR_FREQ), 24.0) * CLASSIC_BAR_MIX;
 		vec3 substrateColor = palette(band) * substrateLight;
 		vec3 ornamentColor = palette(band) * (0.35 + 1.60 * ornamentLight);
 		foil = mix(substrateColor, ornamentColor, bars);
 		foil = saturate(contrast(foil, 1.85), 0.85);
 	}
 
+	// The site's rainbow mask is `mix-blend-mode: luminosity`: it sets the foil's lightness, it does
+	// not cut the foil out. A short hot core overexposes toward white (color-dodge blows the hue out
+	// right at the pointer), a wide ring at mid radius keeps full chroma — that is most of the card —
+	// and only the far corners fall to black and let the art show through.
+	float pointerDist = farthestFraction(p, uPointer, wide);
+	float bloom = smoothstep(0.22, 0.0, pointerDist);
+	float dark = smoothstep(0.55, 1.0, pointerDist);
+	foil = mix(foil, vec3(1.0), bloom);
+	foil = mix(foil, vec3(0.0), dark);
+
 	// Grain breaks the sheet up; it belongs to the foil, so a card at rest stays clean.
 	float grain = mix(1.0, 0.55 + 0.90 * hash12(floor(frag * 1.5) + uSeed * 31.0), uGrain);
 
-	// The site gates its rainbow with a `luminosity` radial under `brightness(.6) contrast(4)` so
-	// the foil only lives near the light; without it the pattern reads as stripes over the whole card.
-	float rainbowGate = farthestGate(p, uPointer, wide, 0.6, 4.0);
-
 	float amount = clamp(uPointerStrength, 0.0, 1.0);
-	float foilAmount = uFoil * mask * amount * grain * light * rainbowGate * (0.75 + 0.45 * fromCentre);
+	float foilAmount = uFoil * mask * amount * grain * light * (0.75 + 0.45 * fromCentre);
 
 	vec3 col = foilBlend(base, clamp(foil * foilAmount, 0.0, 1.0));
 

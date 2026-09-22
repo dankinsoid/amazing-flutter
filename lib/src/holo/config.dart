@@ -16,7 +16,7 @@ class HoloConfig {
 		this.foil = 0.85,
 		this.glare = 0.55,
 		this.grain = 0.25,
-		this.bandScale = 2.8,
+		this.bandScale = 0.5,
 		this.radius = 18,
 		this.seed = 0,
 		this.maxAngle = 12 * math.pi / 180,
@@ -36,6 +36,8 @@ class HoloConfig {
 	final double foil;
 	final double glare;
 	final double grain;
+
+	/// Colour periods across the card; ~0.5 is roughly one full sweep, matching the site.
 	final double bandScale;
 
 	/// Corner radius in logical px; the shader clips it, the child need not.
@@ -80,7 +82,7 @@ class HoloConfig {
 		foil: 0.95,
 		glare: 0.5,
 		grain: 0.45,
-		bandScale: 5.5,
+		bandScale: 1.0,
 		seed: 3,
 	);
 
@@ -90,7 +92,7 @@ class HoloConfig {
 		foil: 0.8,
 		glare: 0.65,
 		grain: 0.1,
-		bandScale: 1.6,
+		bandScale: 0.3,
 		seed: 7,
 	);
 
