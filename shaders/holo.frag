@@ -48,12 +48,12 @@ const float LIGHT_HEIGHT = 0.75;  // light above the card, in half-card units
 const float VIEW_DIST = 2.40;     // viewer above the card, in half-card units
 const float SHININESS = 14.0;
 
-// Texture varies on the scale of pixels, colour on the scale of the card; these ornament
-// frequencies are fixed so they never set the colour period the way `uBandScale` does.
-const float CLASSIC_BAR_FREQ = 0.16;    // rad/px, ~39 px between bars: sparse, not a full-card screen
-const float CLASSIC_BAR_MIX = 0.55;     // the bars stay a minority blend over the substrate
+// Any periodic ornament reads as stripes; the classic sheen is patches of an fbm field
+// instead, at card scale, independent of `uBandScale` so it never sets the colour period.
+const float CLASSIC_SHEEN_SCALE = 2.2;  // fbm frequency, in card-widths: a few soft patches, not lines
+const float CLASSIC_SHEEN_MIX = 0.55;   // the patches stay a minority blend over the substrate
 const float REVERSE_RIDGE_FREQ = 9.0;   // engraving frequency, independent of uBandScale
-const float REVERSE_RIDGE_MIX = 0.55;   // ridge contrast stays under the rainbow's
+const float REVERSE_RIDGE_MIX = 0.35;   // real reverse-holo cards etch lines, but faint under the rainbow
 
 bool isPattern(float pattern) {
 	return abs(uPattern - pattern) < 0.5;
@@ -200,17 +200,20 @@ void main() {
 	float fromCentre = clamp(length(uPointer), 0.0, 1.0);
 	float tiltAmount = clamp(length(uTilt), 0.0, 1.0);
 
-	// The rainbow sweeps because the tilt shifts the phase, as --background-position does on the
-	// site — scaled up 3x (the site moves a 400% background by factors 2.6/3.5 of the pointer) so
-	// a tilt sweeps several periods of the spectrum instead of nudging it within one. Kept apart
-	// from the spatial term below, which is what carries `uBandScale`; texture frequencies reuse
-	// this phase for the same sweep motion but never the spatial term, so they never set the colour period.
-	float sweepPhase = dot(uTilt, vec2(4.80, 3.30)) + tiltAmount * 0.55 + uSeed * 0.37;
+	// The rainbow answers to the tilt rather than scrolling: on the real card, tilting shifts the
+	// colour noticeably but never cycles through it, so this stays well under one period across the
+	// full -1..1 tilt range. Kept apart from the spatial term below, which is what carries
+	// `uBandScale`; texture frequencies reuse this phase for the same motion but never the spatial
+	// term, so they never set the colour period.
+	float sweepPhase = dot(uTilt, vec2(0.35, 0.25)) + tiltAmount * 0.55 + uSeed * 0.37;
 	vec2 bandDir = normalize(vec2(0.94, 0.34));
 	float bandSpatial = dot(p * wide, bandDir);
 	float band = bandSpatial * uBandScale + sweepPhase;
 
+	// Galaxy's sparkle glint keeps its own fast phase — that look is already right. Reverse gets a
+	// slower one, scaled down the same way sweepPhase was, so its sparkles glint rather than strobe.
 	float glint = dot(uTilt, vec2(5.3, 3.7)) + uSeed;
+	float reverseGlint = dot(uTilt, vec2(0.40, 0.30)) + uSeed;
 
 	// Same n·h light term, split into a broad weight and a tight one: the substrate takes the
 	// broad reflectance and stays dull off-axis, the ornament takes the tight one and only flares
@@ -227,7 +230,7 @@ void main() {
 		vec3 substrateColor = palette(band * 0.45 + 0.10) * substrateLight;
 		vec3 ornamentColor = palette(band * 0.45 + 0.10) * (0.35 + 1.70 * ornamentLight);
 		foil = mix(substrateColor, ornamentColor, ridge);
-		foil += vec3(1.0, 0.96, 0.88) * sparkle(frag, 5.0, 0.55, glint * 1.6, uSeed) * 1.4;
+		foil += vec3(1.0, 0.96, 0.88) * sparkle(frag, 5.0, 0.55, reverseGlint * 1.6, uSeed) * 1.4;
 		foil = saturate(contrast(foil, 1.55), 1.10);
 	} else if (isPattern(PATTERN_GALAXY)) {
 		// Cosmos: a dark plasma the colour rides on, dense stars glinting in and out.
@@ -237,11 +240,14 @@ void main() {
 		foil += vec3(0.75, 0.85, 1.0) * sparkle(frag, 17.0, 0.40, glint * 1.3 + 2.0, uSeed + 23.0) * 1.3;
 		foil = saturate(contrast(foil, 1.20), 1.05);
 	} else {
-		// Classic: a rainbow substrate under sparse bars as the ornament, not a full-card screen.
-		float bars = pow(0.5 + 0.5 * cos(frag.y * CLASSIC_BAR_FREQ), 24.0) * CLASSIC_BAR_MIX;
+		// Classic: a rainbow substrate with patches of a duller/glossier sheen as the ornament — an
+		// fbm field, like galaxy's cloud, so the surface breaks up without any periodic line to read
+		// as a stripe.
+		float sheen = fbm(uv * vec2(CLASSIC_SHEEN_SCALE * aspect, CLASSIC_SHEEN_SCALE) + uSeed * 5.0 + 3.0);
+		float patches = smoothstep(0.35, 0.75, sheen) * CLASSIC_SHEEN_MIX;
 		vec3 substrateColor = palette(band) * substrateLight;
 		vec3 ornamentColor = palette(band) * (0.35 + 1.60 * ornamentLight);
-		foil = mix(substrateColor, ornamentColor, bars);
+		foil = mix(substrateColor, ornamentColor, patches);
 		foil = saturate(contrast(foil, 1.85), 0.85);
 	}
 

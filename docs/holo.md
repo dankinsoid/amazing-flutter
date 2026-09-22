@@ -130,20 +130,25 @@ substrate and a tight one (`(n·h)^14`) for the ornament laid over it — one
 normal, two reflectances, never a second lobe computed for the ornament alone.
 
 **The phase.** `band = bandSpatial·uBandScale + sweepPhase`, where `bandSpatial
-= dot(p·wide, dir)` and `sweepPhase = dot(uTilt, (4.8, 3.3)) + |uTilt|·0.55 +
-uSeed·0.37`. `uBandScale` defaults to ~0.5 — roughly one colour period across
-the card, matching the site's `background-size: 400% 400%` on a repeating
-gradient, which shows well under one sweep of its own period. `sweepPhase` is
-the tilt-bound `background-position`, scaled to match the site's 400%-background
-move (factors 2.6/3.5 of the pointer) so a tilt rolls the spectrum through
-several periods on its own, independent of `uBandScale`. The `|uTilt|·0.55`
-term is the thin-film part: interference colour depends on the *angle* through
-the film, which is isotropic, so the hue shifts with tilt magnitude on top of
-the directional sweep. `bandSpatial` and `sweepPhase` are kept apart because
-the ornament frequencies below reuse `sweepPhase` for the same sweep motion but
-never `bandSpatial·uBandScale` — texture must not set the colour period.
-Colour comes from an Inigo Quilez cosine palette, then a contrast and
-saturation curve standing in for the CSS `filter:` chain.
+= dot(p·wide, dir)` and `sweepPhase = dot(uTilt, (0.35, 0.25)) + |uTilt|·0.55 +
+uSeed·0.37`. `uBandScale` defaults to ~0.2 — about a quarter colour period
+across the card (cyan in one corner, yellow-green in the other, never a visible
+repeat), read directly off the reference at poke-holo.simey.me: the site's
+`background-size: 400% 400%` shows a small slice of one period, not several.
+`sweepPhase` is the tilt-bound `background-position`, kept small enough that a
+full tilt shifts the hue noticeably without ever cycling through it — an
+earlier pass here used `(4.8, 3.3)`, matched to the site's raw background-move
+factors, and it was wrong: the site's `background-position` moves a *tiled*
+gradient under a mask, so its factor says nothing about how many colour
+periods should cross the visible card, and reproducing it made the card look
+like a rainbow scrolling past rather than a surface that answers to the angle.
+The `|uTilt|·0.55` term is the thin-film part: interference colour depends on
+the *angle* through the film, which is isotropic, so the hue shifts with tilt
+magnitude on top of the directional sweep. `bandSpatial` and `sweepPhase` are
+kept apart because the ornament frequencies below reuse `sweepPhase` for the
+same motion but never `bandSpatial·uBandScale` — texture must not set the
+colour period. Colour comes from an Inigo Quilez cosine palette, then a
+contrast and saturation curve standing in for the CSS `filter:` chain.
 
 **The rainbow's lightness.** The site's mask is `mix-blend-mode: luminosity` —
 it sets the foil's *lightness*, it does not cut the foil out. Confirmed against
@@ -160,25 +165,34 @@ rainbow field itself is present everywhere; only its lightness travels.
 **The sparkles.** One hashed dot per cell: `cos(h·2π·6 + phase(tilt))` through a
 `smoothstep(0.80, 1.0)` gate, so a cell is lit only while the tilt phase sweeps
 past its own hash. Tilting changes *which* sparkles are on, which is the thing a
-static grain texture can only fake.
+static grain texture can only fake. Galaxy's `glint = dot(uTilt, (5.3, 3.7)) +
+uSeed` is fast on purpose — dense stars glinting in and out is the point of
+that pattern, and it was already right. Reverse shares the sparkle mechanism
+but not that phase: it gets its own `reverseGlint = dot(uTilt, (0.4, 0.3)) +
+uSeed`, scaled down the same way `sweepPhase` was, so its sparkles glint
+rather than strobe under a small tilt.
 
 Patterns differ only in how those five combine:
 
 | `uPattern` | Look | Extra |
 |---|---|---|
-| 0 classic | rainbow substrate under sparse bars as the ornament, `pow(cos, 24)` at a fixed frequency | — |
-| 1 reverse | duller substrate, etched ridges as the ornament at a fixed frequency, `pow(triangle, 5)` | 5 px sparkle grid, warm |
+| 0 classic | rainbow substrate with fbm patches of sheen as the ornament, card-scale and non-periodic | — |
+| 1 reverse | duller substrate, faint etched ridges as the ornament at a fixed frequency, `pow(triangle, 5)` | 5 px sparkle grid, warm, slow phase |
 | 2 galaxy | palette riding a 3-octave FBM cloud | two sparkle grids, 7 px and 17 px |
 
 Classic and reverse both `mix(substrateColor, ornamentColor, ornamentMask *
 MIX)`: the substrate uses the broad reflectance and stays visible (if dull)
 everywhere, the ornament uses the tight one and only shows its own colour
-where the mask (`bars` or `ridge`) says the foil or the engraving actually is.
-Both masks run at a frequency fixed in the shader (`CLASSIC_BAR_FREQ`,
-`REVERSE_RIDGE_FREQ`) rather than `uBandScale`, and are capped by a `MIX`
-constant well under 1 — a fine, low-contrast texture riding a card-scale
-colour field, not a second source of colour bands. Galaxy already had two
-reflectances — `palette()` multiplied by `fbm` — so it is unchanged.
+where the mask says the sheen or the engraving actually is. Classic's mask is
+an `fbm` field (`CLASSIC_SHEEN_SCALE`, a few card-scale patches) rather than
+anything periodic — a repeating line, however sparse, still reads as a stripe,
+which is what an earlier pass here got wrong twice (a fine grating, then a
+sparser one). Reverse's mask is still a fixed-frequency ridge
+(`REVERSE_RIDGE_FREQ`, independent of `uBandScale`) because real reverse-holo
+cards do etch lines, but its `MIX` was lowered to 0.35 so the engraving stays
+a faint texture under the rainbow rather than competing with it. Galaxy
+already had two reflectances — `palette()` multiplied by `fbm` — so it is
+unchanged.
 
 ## 6. Blending
 

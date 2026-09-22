@@ -267,7 +267,7 @@ class _HoloDemoState extends State<HoloDemo> with TickerProviderStateMixin {
 					_row('foil', _foil, 0, 2, (v) => setState(() => _foil = v)),
 					_row('glare', _glare, 0, 1.5, (v) => setState(() => _glare = v)),
 					_row('grain', _grain, 0, 1, (v) => setState(() => _grain = v)),
-					_row('bandScale', _bandScale, 0.1, 3, (v) => setState(() => _bandScale = v)),
+					_row('bandScale', _bandScale, 0.05, 1.5, (v) => setState(() => _bandScale = v)),
 					_row('radius', _radius, 0, 60, (v) => setState(() => _radius = v)),
 					_row('seed', _seed, 0, 20, (v) => setState(() => _seed = v)),
 					_group('Card'),
