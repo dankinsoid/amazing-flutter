@@ -1,38 +1,10 @@
 # amazing_flutter
 
-GPU shader effects for Flutter: refracting glass, a real fluid solver, holographic
-foil, and dissolves — all written as fragment shaders and driven from Dart.
+GPU shader effects for Flutter: a real fluid solver, holographic foil, refracting
+glass, and dissolves — all written as fragment shaders and driven from Dart.
 
 Everything below is a screen recording of the example app, rendered in real time
 on Impeller.
-
----
-
-## Liquid glass
-
-https://github.com/user-attachments/assets/190ad2ae-f940-45ba-8bcd-d7bdbe8dd831
-
-One backdrop pass draws every glass surface in the scene: shapes are merged with a
-smooth minimum into a single distance field, turned into a height field, and the
-normal of that field refracts the backdrop. The border carries spectral dispersion,
-so the steep rim splits the background into a fringe instead of a white outline.
-Touches drop water rings into the same height field, which is why a ripple can cross
-the wallpaper and enter the glass.
-
-```dart
-LiquidGlass(
-	shapes: [
-		GlassCapsule(a: Offset(60, 120), b: Offset(300, 120), radius: 28),
-		GlassCircle(center: blob, radius: 74),
-	],
-	material: const GlassMaterial(edgeWidth: 26, thickness: 88, aberration: 0.45),
-	child: wallpaper,
-)
-```
-
-The height field lives in screen coordinates, so `LiquidGlass` fills the screen and
-shape positions are screen positions — that is what makes one pass enough for the
-whole scene. Design notes: [`docs/liquid_glass.md`](docs/liquid_glass.md).
 
 ---
 
@@ -72,6 +44,14 @@ that tracks the pointer, and sparkles that glint in and out with the angle. Ther
 are no foil textures — the pattern is a cosine palette and a hash, and the mask is
 the child's own luminance, so any card gets a foil that follows its artwork.
 
+The idea comes straight from the holographic Pokémon cards of
+[poke-holo](https://poke-holo.simey.me/) and
+[pokemon-cards-css](https://github.com/simeydotme/pokemon-cards-css) (MIT). Nothing
+was copied — what was taken is the recipe, and the port is not one to one: the site
+stacks DOM layers with CSS blend modes over authored foil artwork, this is one
+fragment shader with no assets. A CSS gradient has no surface normal, so its foil
+moves but never faces the light, and its grain cannot change which grains are lit.
+
 ```dart
 HoloCard(
 	config: HoloConfig.galaxy,
@@ -82,6 +62,34 @@ HoloCard(
 
 Cursor drives it on desktop, the accelerometer on phones, both smoothed by a One
 Euro filter. Design notes: [`docs/holo.md`](docs/holo.md).
+
+---
+
+## Liquid glass
+
+https://github.com/user-attachments/assets/190ad2ae-f940-45ba-8bcd-d7bdbe8dd831
+
+One backdrop pass draws every glass surface in the scene: shapes are merged with a
+smooth minimum into a single distance field, turned into a height field, and the
+normal of that field refracts the backdrop. The border carries spectral dispersion,
+so the steep rim splits the background into a fringe instead of a white outline.
+Touches drop water rings into the same height field, which is why a ripple can cross
+the wallpaper and enter the glass.
+
+```dart
+LiquidGlass(
+	shapes: [
+		GlassCapsule(a: Offset(60, 120), b: Offset(300, 120), radius: 28),
+		GlassCircle(center: blob, radius: 74),
+	],
+	material: const GlassMaterial(edgeWidth: 26, thickness: 88, aberration: 0.45),
+	child: wallpaper,
+)
+```
+
+The height field lives in screen coordinates, so `LiquidGlass` fills the screen and
+shape positions are screen positions — that is what makes one pass enough for the
+whole scene. Design notes: [`docs/liquid_glass.md`](docs/liquid_glass.md).
 
 ---
 
