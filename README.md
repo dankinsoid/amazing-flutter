@@ -6,6 +6,10 @@ glass, and dissolves — all written as fragment shaders and driven from Dart.
 Everything below is a screen recording of the example app, rendered in real time
 on Impeller.
 
+> **Beta.** The effects work, the API does not stand still yet: names and parameters
+> change between commits, there is no release on pub.dev, and only macOS and iOS are
+> exercised regularly. Pin a commit if you depend on it.
+
 ---
 
 ## Fluid
