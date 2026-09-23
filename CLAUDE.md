@@ -1,7 +1,7 @@
 # amazing-flutter
 
 GPU shader effects for Flutter. Read `CONTEXT.md` before starting work — it holds
-the settled architectural decisions and the build order. `README.md` is the
+the settled architectural decisions and the build order. `docs/research.md` is the
 background research behind them.
 
 ## Language

@@ -1,6 +1,6 @@
 # Project context
 
-Start here. `README.md` is the research — *what we found out*. This file is
+Start here. `docs/research.md` is the research — *what we found out*. This file is
 *what we decided and what to do next*.
 
 ## What this repo is
@@ -19,7 +19,7 @@ as packages.
 ## Decisions already made
 
 These were argued through and settled. Reopen them only with a concrete reason —
-each one has a rationale in `README.md`.
+each one has a rationale in `docs/research.md`.
 
 1. **One height field, in screen coordinates, shared across the scene.**
    Not per-panel. This is what makes "ripples inside a glass pill" and "a ripple
