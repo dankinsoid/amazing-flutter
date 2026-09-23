@@ -283,15 +283,33 @@ vec2 backdropUv(vec2 p) {
 	return uv;
 }
 
+// Taps across the spectrum. Three channels give three ghosts; five weighted taps
+// give a graded fringe, which is what the steep border actually looks like.
+#define DISPERSION_TAPS 5
+
+// Cheap wavelength response: u runs red (0) to blue (1).
+vec3 spectralWeight(float u) {
+	vec3 d = vec3(u - 0.16, u - 0.5, u - 0.84);
+	return exp(-d * d * 16.0);
+}
+
 vec4 sampleBackdrop(vec2 p, vec3 n) {
 	vec2 offset = n.xy * uThickness;
 	if (uAberration < 1e-4) {
 		return texture(uBackdrop, backdropUv(p + offset));
 	}
-	vec4 r = texture(uBackdrop, backdropUv(p + offset * (1.0 - uAberration)));
-	vec4 g = texture(uBackdrop, backdropUv(p + offset));
-	vec4 b = texture(uBackdrop, backdropUv(p + offset * (1.0 + uAberration)));
-	return vec4(r.r, g.g, b.b, g.a);
+	vec3 acc = vec3(0.0);
+	vec3 sum = vec3(0.0);
+	float alpha = 1.0;
+	for (int i = 0; i < DISPERSION_TAPS; i++) {
+		float u = float(i) / float(DISPERSION_TAPS - 1);
+		vec3 w = spectralWeight(u);
+		vec4 s = texture(uBackdrop, backdropUv(p + offset * mix(1.0 - uAberration, 1.0 + uAberration, u)));
+		acc += s.rgb * w;
+		sum += w;
+		if (i * 2 == DISPERSION_TAPS - 1) alpha = s.a;
+	}
+	return vec4(acc / sum, alpha);
 }
 
 // At rest the envelope is 0, so content is read at its own texel centres.
@@ -317,7 +335,8 @@ Light lighting(vec3 n, float sd) {
 	float band = 1.0 - smoothstep(0.0, uRimWidth, -sd);
 	Light lt;
 	lt.specular = uSpecular * pow(max(dot(n, h), 0.0), uShininess);
-	lt.rim = uRim * band * max(dot(n, l), 0.0);
+	// Squared band and a tightened cosine: an arc on the lit side, not a white outline.
+	lt.rim = uRim * band * band * pow(max(dot(n, l), 0.0), 3.0);
 	lt.fresnel = uFresnel * pow(1.0 - max(n.z, 0.0), 5.0);
 	return lt;
 }
