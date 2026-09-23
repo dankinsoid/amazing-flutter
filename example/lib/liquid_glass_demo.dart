@@ -17,6 +17,8 @@ const _debugChrome = true;
 const _drift = true;
 // Seconds from launch at which a snap of each scene is written; see snap.dart.
 const _debugSnapAt = <double>[];
+// Frost sweep for the snapshot pass: one showcase frame per sigma.
+const _debugFrost = <double>[0, 8, 16];
 
 enum _Scene { showcase, presets }
 
@@ -69,19 +71,23 @@ class _LiquidGlassDemoState extends State<LiquidGlassDemo> with TickerProviderSt
 	late final AnimationController _pan = AnimationController(vsync: this, duration: const Duration(seconds: 28));
 	final _ripples = GlassRipples();
 	bool _dragging = false;
+	// edgeWidth stays under the inradius of the thinnest shape: a ramp wider than that
+	// never reaches the plateau, and the leftover crease along the medial axis reads as
+	// a hard specular line down the middle of a capsule.
 	GlassMaterial _material = const GlassMaterial(
-		edgeWidth: 30,
-		height: 20,
-		thickness: 58,
+		edgeWidth: 26,
+		height: 24,
+		thickness: 88,
 		aberration: 0.45,
-		specular: 0.55,
+		specular: 0.5,
 		shininess: 50,
 		rim: 0.6,
-		rimWidth: 7,
+		rimWidth: 8,
 		fresnel: 0.3,
 		innerShadow: 0.14,
-		tintStrength: 0.04,
-		saturation: 1.12,
+		tintStrength: 0.06,
+		saturation: 1.15,
+		frostSigma: 10,
 	);
 	_Scene _scene = _debugScene;
 	bool? _panelOpen;
@@ -102,13 +108,17 @@ class _LiquidGlassDemoState extends State<LiquidGlassDemo> with TickerProviderSt
 		startSnapPump();
 		WidgetsBinding.instance.addPostFrameCallback((_) async {
 			final dpr = MediaQuery.devicePixelRatioOf(context);
-			for (final scene in _Scene.values) {
-				setState(() => _scene = scene);
-				for (final at in _debugSnapAt) {
-					await Future<void>.delayed(Duration(milliseconds: (at * 1000).round()));
-					await writeSnap('glass_${scene.name}_${at.toStringAsFixed(1)}s', dpr);
-				}
+			for (final sigma in _debugFrost) {
+				setState(() {
+					_scene = _Scene.showcase;
+					_material = _material.copyWith(frostSigma: sigma);
+				});
+				await Future<void>.delayed(const Duration(milliseconds: 1200));
+				await writeSnap('glass_frost_${sigma.toStringAsFixed(0)}', dpr);
 			}
+			setState(() => _scene = _Scene.presets);
+			await Future<void>.delayed(const Duration(milliseconds: 1200));
+			await writeSnap('glass_presets', dpr);
 			stopSnapPump();
 		});
 	}
@@ -205,7 +215,7 @@ class _LiquidGlassDemoState extends State<LiquidGlassDemo> with TickerProviderSt
 				final safe = MediaQuery.paddingOf(context);
 				final pillWidth = math.min(size.width - 56, 400.0);
 				final dockWidth = math.min(size.width - 64, 340.0);
-				final pillY = safe.top + 58;
+				final pillY = safe.top + 104;
 				final dockY = size.height - safe.bottom - 52;
 				final centre = size.width / 2;
 				return GestureDetector(
@@ -231,14 +241,14 @@ class _LiquidGlassDemoState extends State<LiquidGlassDemo> with TickerProviderSt
 							LiquidGlass(
 								shapes: [
 									GlassCapsule(
-										a: Offset(centre - pillWidth / 2 + 21, pillY),
-										b: Offset(centre + pillWidth / 2 - 21, pillY),
-										radius: 21,
+										a: Offset(centre - pillWidth / 2 + 28, pillY),
+										b: Offset(centre + pillWidth / 2 - 28, pillY),
+										radius: 28,
 									),
 									GlassCapsule(
-										a: Offset(centre - dockWidth / 2 + 29, dockY),
-										b: Offset(centre + dockWidth / 2 - 29, dockY),
-										radius: 29,
+										a: Offset(centre - dockWidth / 2 + 34, dockY),
+										b: Offset(centre + dockWidth / 2 - 34, dockY),
+										radius: 34,
 									),
 									GlassCircle(center: _blob.position, radius: _blobRadius, deform: _blob.deform),
 								],
@@ -248,17 +258,17 @@ class _LiquidGlassDemoState extends State<LiquidGlassDemo> with TickerProviderSt
 							),
 							// Labels ride on top of the glass; only the gallery below refracts.
 							Positioned(
-								top: pillY - 21,
+								top: pillY - 28,
 								left: centre - pillWidth / 2,
 								width: pillWidth,
-								height: 42,
+								height: 56,
 								child: const _SearchLabel(),
 							),
 							Positioned(
-								top: dockY - 29,
+								top: dockY - 34,
 								left: centre - dockWidth / 2,
 								width: dockWidth,
-								height: 58,
+								height: 68,
 								child: const _DockLabel(),
 							),
 						],
@@ -454,7 +464,7 @@ class _Gallery extends StatelessWidget {
 							begin: Alignment.center,
 							end: Alignment.bottomCenter,
 							stops: [0, 0.55, 1],
-							colors: [Color(0x00000000), Color(0x40000000), Color(0xD9000000)],
+							colors: [Color(0x00000000), Color(0x73000000), Color(0xE6000000)],
 						),
 					),
 				),
@@ -468,12 +478,18 @@ class _Gallery extends StatelessWidget {
 						children: [
 							Text(
 								'Lakeshore Drive',
-								style: TextStyle(color: Colors.white, fontSize: 30, fontWeight: FontWeight.w600, letterSpacing: -0.4),
+								style: TextStyle(
+									color: Colors.white,
+									fontSize: 30,
+									fontWeight: FontWeight.w600,
+									letterSpacing: -0.4,
+									shadows: _chromeShadow,
+								),
 							),
 							SizedBox(height: 4),
 							Text(
 								'30 s · f/11 · ISO 64 — 18 frames',
-								style: TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 0.4),
+								style: TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 0.4, shadows: _chromeShadow),
 							),
 						],
 					),
@@ -521,20 +537,17 @@ class _Strip extends StatelessWidget {
 	}
 }
 
+/// Chrome reads against blown-out highlights only if it carries its own shadow;
+/// a tint dark enough to do the same job flattens the refraction everywhere else.
+const _chromeShadow = [Shadow(color: Color(0xCC000914), blurRadius: 10)];
+
 class _SearchLabel extends StatelessWidget {
 	const _SearchLabel();
 
 	@override
 	Widget build(BuildContext context) {
 		return const IgnorePointer(
-			child: Row(
-				children: [
-					SizedBox(width: 18),
-					Icon(Icons.search, color: Colors.white70, size: 17),
-					SizedBox(width: 8),
-					Text('Search 4 812 photos', style: TextStyle(color: Colors.white70, fontSize: 13)),
-				],
-			),
+			child: Center(child: Icon(Icons.search, color: Colors.white, size: 20, shadows: _chromeShadow)),
 		);
 	}
 }
@@ -556,7 +569,12 @@ class _DockLabel extends StatelessWidget {
 				mainAxisAlignment: MainAxisAlignment.spaceEvenly,
 				children: [
 					for (var i = 0; i < _icons.length; i++)
-						Icon(_icons[i], color: i == 0 ? Colors.white : Colors.white54, size: 21),
+						Icon(
+							_icons[i],
+							color: Colors.white,
+							size: 22,
+							shadows: _chromeShadow,
+						),
 				],
 			),
 		);

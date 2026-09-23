@@ -56,6 +56,9 @@ const _profileRuns = <(String, double, double, double, double)>[
 
 const _profileFrames = 120;
 
+const _cardWidth = 150.0;
+const _cardHeight = 200.0;
+
 const _cards = <(String, String, List<Color>)>[
 	('Flow', 'drag across me', [Color(0xFF7B2FF7), Color(0xFFF107A3)]),
 	('Swirl', 'or stir slowly', [Color(0xFF00B4DB), Color(0xFF0083B0)]),
@@ -83,6 +86,9 @@ class _FluidDemoState extends State<FluidDemo> {
 		: const FluidConfig(dissipationSpeed: _debugDecaySpeed);
 	FluidPreset? _preset;
 	bool? _panelOpen;
+
+	/// A stamped card is dye now; dye does not come back on its own.
+	final Set<int> _gone = <int>{};
 
 	/// A phone has no room beside a 260px panel; it starts closed there.
 	bool get _panel => _panelOpen ?? MediaQuery.sizeOf(context).width > 700;
@@ -373,17 +379,21 @@ class _FluidDemoState extends State<FluidDemo> {
 							alignment: WrapAlignment.center,
 							children: [
 								for (var i = 0; i < _cards.length; i++)
-									Fluid(
-										key: _cardKeys[i],
-										controller: _effects[i],
-										child: Visibility(
-											visible: !_debugBackdrop,
-											maintainSize: true,
-											maintainAnimation: true,
-											maintainState: true,
-											child: _Card(card: _cards[_debugIdenticalCards ? 0 : i]),
+									if (_gone.contains(i))
+										const SizedBox(width: _cardWidth, height: _cardHeight)
+									else
+										Fluid(
+											key: _cardKeys[i],
+											controller: _effects[i],
+											onDismissed: () => setState(() => _gone.add(i)),
+											child: Visibility(
+												visible: !_debugBackdrop,
+												maintainSize: true,
+												maintainAnimation: true,
+												maintainState: true,
+												child: _Card(card: _cards[_debugIdenticalCards ? 0 : i]),
+											),
 										),
-									),
 							],
 						),
 					),
@@ -455,6 +465,10 @@ class _FluidDemoState extends State<FluidDemo> {
 									child: const Text('Play'),
 								),
 								TextButton(onPressed: _runProfile, child: const Text('Profile')),
+								TextButton(
+									onPressed: _gone.isEmpty ? null : () => setState(_gone.clear),
+									child: const Text('Restore'),
+								),
 							],
 						),
 					),
@@ -517,8 +531,8 @@ class _Card extends StatelessWidget {
 	Widget build(BuildContext context) {
 		final (title, hint, colors) = card;
 		return Container(
-			width: 150,
-			height: 200,
+			width: _cardWidth,
+			height: _cardHeight,
 			decoration: BoxDecoration(
 				gradient: LinearGradient(colors: colors, begin: Alignment.topLeft, end: Alignment.bottomRight),
 				borderRadius: BorderRadius.circular(20),
