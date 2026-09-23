@@ -23,6 +23,7 @@ flutter:
     - shaders/liquid_glass.frag
     - shaders/disintegration.frag
     - shaders/holo.frag
+    - shaders/glitter.frag
     - shaders/fluid_advection.frag
     - shaders/fluid_curl.frag
     - shaders/fluid_divergence.frag

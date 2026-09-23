@@ -155,6 +155,14 @@ predicts: the card-sized walls read as a visible rectangle, smoke could not drif
 past a neighbour, and the pass count multiplied by the number of cards. Design,
 units, and the measurements: `docs/fluid.md`.
 
+**Ported in: glitter.** `shaders/glitter.frag` plus `lib/src/glitter/` — a flat
+tone dusted with tiny mirrors, each flashing only while the light lines up with
+it. The cheapest primitive here: self-contained, no sampler, no backdrop, no
+fallback. It comes from the Metal `GlitterSurface` in ReferenceCam and one part
+of it does not port at all — the original spills flashes past SDR white by the
+display's EDR headroom, and Flutter has no HDR or headroom API whatsoever, so the
+flash clips. Design, uniform table and what that costs: `docs/glitter.md`.
+
 **Done out of order: disintegration, and with it the snapshot primitive.**
 `lib/src/snapshot/` is now the second row of the table above: `SnapshotHost` wraps
 a child in a `RepaintBoundary`, freezes it with `toImageSync` on gesture start —
